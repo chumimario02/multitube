@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#06060c" />
+  <meta name="description" content="MULTITUBE: crea una sala y mira YouTube sincronizado con tus amigos. El host elige los videos." />
+  <title>MULTITUBE — Mira YouTube con tus amigos</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Fondo animado -->
+  <div class="bg" aria-hidden="true">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+    <div class="bg-grid"></div>
+  </div>
+
+  <!-- Navegación -->
+  <header class="nav" id="nav">
+    <a class="logo" href="/" aria-label="MULTITUBE inicio">
+      <span class="logo-mark">
+        <svg viewBox="0 0 32 32" aria-hidden="true">
+          <defs>
+            <linearGradient id="logo-grad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#a78bfa" />
+              <stop offset=".55" stop-color="#ec4899" />
+              <stop offset="1" stop-color="#22d3ee" />
+            </linearGradient>
+          </defs>
+          <rect x="2" y="2" width="28" height="28" rx="9" fill="url(#logo-grad)" />
+          <path d="M13 10.4v11.2l9-5.6-9-5.6z" fill="#0b0712" />
+        </svg>
+      </span>
+      <span class="logo-text">MULTI<span>TUBE</span></span>
+    </a>
+
+    <div class="nav-right">
+      <span class="conn" id="conn-status">
+        <span class="conn-dot"></span>
+        <span id="conn-text">Conectando…</span>
+      </span>
+    </div>
+  </header>
+
+  <!-- ============================ HOME ============================ -->
+  <main id="view-home" class="view home-view">
+    <section class="hero">
+      <div class="hero-copy">
+        <span class="eyebrow"><span class="dot"></span> Watch party para tus amigos</span>
+        <h1>Miren YouTube<br /><span class="grad">al mismo tiempo.</span></h1>
+        <p class="lead">
+          Crea una sala, comparte el código y el host pone los videos.
+          Todos ven lo mismo, sincronizado. Sin cuentas, sin descargas.
+        </p>
+
+        <div class="hero-actions">
+          <button class="btn btn-primary" id="btn-create" type="button">
+            Crear sala
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13m-5-5 5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="btn btn-ghost" id="btn-join" type="button">Unirse con código</button>
+        </div>
+
+        <div class="hero-meta">
+          <div><strong>30</strong><span>por sala</span></div>
+          <div><strong>0</strong><span>instalaciones</span></div>
+          <div><strong>∞</strong><span>videos</span></div>
+        </div>
+      </div>
+
+      <div class="hero-art" aria-hidden="true">
+        <div class="mock-player">
+          <div class="mock-screen">
+            <span class="mock-play">▶</span>
+            <div class="mock-bar"><i></i></div>
+            <div class="mock-glow"></div>
+          </div>
+          <div class="mock-row">
+            <span class="mock-avatar"></span>
+            <span class="mock-line"></span>
+            <span class="mock-line short"></span>
+          </div>
+        </div>
+        <div class="float-card fc-1"><span>👑</span> Host elige</div>
+        <div class="float-card fc-2"><span>🎬</span> Sala A7K2P</div>
+        <div class="float-card fc-3"><span>💬</span> ¡Qué buena!</div>
+      </div>
+    </section>
+
+    <section class="features">
+      <article class="feature">
+        <span class="feature-icon">🔗</span>
+        <h3>Salas con código</h3>
+        <p>Crea una sala y comparte el link. Tus amigos entran en segundos desde cualquier dispositivo.</p>
+      </article>
+      <article class="feature">
+        <span class="feature-icon">👑</span>
+        <h3>El host manda</h3>
+        <p>El host busca videos con su API key de YouTube o pega un link. Play, pausa y salto sincronizados.</p>
+      </article>
+      <article class="feature">
+        <span class="feature-icon">⚡</span>
+        <h3>Sincronización real</h3>
+        <p>El reproductor se corrige solo si alguien se atrasa. Chat integrado para comentar en vivo.</p>
+      </article>
+    </section>
+
+    <footer class="home-footer">
+      <p>Hecho para ver YouTube con amigos · El host usa su propia API key de Google Cloud</p>
+    </footer>
+  </main>
+
+  <!-- ============================ SALA ============================ -->
+  <main id="view-room" class="view room-view hidden">
+    <div class="room-top">
+      <div class="room-code-box">
+        <span>SALA</span>
+        <strong id="room-code">-----</strong>
+        <button class="mini-btn" id="btn-copy" type="button" title="Copiar link de invitación">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          Copiar link
+        </button>
+      </div>
+
+      <div class="members-wrap">
+        <div class="members" id="members"></div>
+        <span class="member-count" id="member-count">0</span>
+      </div>
+
+      <button class="btn btn-danger-ghost" id="btn-leave" type="button">Salir</button>
+    </div>
+
+    <div class="room-grid">
+      <section class="player-panel">
+        <div class="player-wrap" id="player-wrap">
+          <div id="yt-player"></div>
+
+          <div class="player-cover" id="player-cover">
+            <span class="cover-logo">▶</span>
+            <strong id="cover-text">Agrega un video para empezar</strong>
+            <small>El host controla la reproducción</small>
+          </div>
+
+          <div class="player-shield" id="player-shield" title="Reproducir / pausar"></div>
+
+          <button class="player-gate hidden" id="player-gate" type="button">
+            ▶ Toca para sincronizar
+          </button>
+
+          <button class="sound-pill hidden" id="sound-pill" type="button">
+            🔇 Activar sonido
+          </button>
+        </div>
+
+        <div class="player-bar">
+          <button class="icon-btn" id="btn-play" type="button" title="Reproducir">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+          </button>
+
+          <span class="time" id="time-current">0:00</span>
+          <input type="range" id="seek" min="0" max="100" value="0" step="0.1" aria-label="Progreso del video" />
+          <span class="time" id="time-total">0:00</span>
+
+          <button class="icon-btn hidden" id="btn-next" type="button" title="Siguiente video">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5l9 7-9 7V5z" fill="currentColor"/><path d="M16 5h2v14h-2z" fill="currentColor"/></svg>
+          </button>
+          <button class="icon-btn" id="btn-vol" type="button" title="Silenciar">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+          <button class="icon-btn" id="btn-fs" type="button" title="Pantalla completa">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+
+        <div class="now-playing" id="now-playing">
+          <span class="np-empty">Nada reproduciéndose todavía</span>
+        </div>
+
+        <p class="host-hint" id="host-hint">Solo el host controla la reproducción</p>
+      </section>
+
+      <aside class="side-panel">
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="queue" type="button">Cola <span class="tab-count" id="queue-count">0</span></button>
+          <button class="tab-btn" data-tab="chat" type="button">Chat</button>
+        </div>
+
+        <!-- COLA -->
+        <div class="tab-pane" id="tab-queue">
+          <div class="host-tools hidden" id="host-tools">
+            <div class="api-row">
+              <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="YouTube API key (solo host)" />
+              <button class="mini-btn solid" id="btn-save-key" type="button">Guardar</button>
+            </div>
+            <a class="key-help" id="key-help" href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener noreferrer">
+              ¿Cómo obtengo mi API key? ↗
+            </a>
+
+            <div class="search-row">
+              <input id="search-input" type="search" autocomplete="off" placeholder="Buscar en YouTube…" />
+              <button class="icon-btn search-btn" id="btn-search" type="button" title="Buscar">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m16 16 4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+            <div class="search-results" id="search-results"></div>
+
+            <div class="url-row">
+              <input id="url-input" type="url" autocomplete="off" placeholder="…o pega un link de YouTube" />
+              <button class="icon-btn" id="btn-add-url" type="button" title="Agregar video">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <ul class="queue-list" id="queue-list"></ul>
+          <div class="empty-state" id="queue-empty">
+            <span>🎬</span>
+            <p>La cola está vacía.</p>
+            <small>El host puede buscar videos o pegar un link.</small>
+          </div>
+        </div>
+
+        <!-- CHAT -->
+        <div class="tab-pane hidden" id="tab-chat">
+          <div class="chat-messages" id="chat-messages"></div>
+          <form class="chat-form" id="chat-form" autocomplete="off">
+            <input id="chat-input" type="text" maxlength="300" placeholder="Escribe un mensaje…" />
+            <button class="icon-btn send-btn" type="submit" title="Enviar">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12 20 4l-6 16-3.2-6.8L4 12z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+            </button>
+          </form>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <!-- ============================ MODAL ============================ -->
+  <div class="modal-backdrop hidden" id="modal">
+    <div class="modal" role="dialog" aria-modal="true">
+      <button class="modal-close" id="modal-close" type="button" aria-label="Cerrar">×</button>
+
+      <div class="modal-panel" id="panel-create">
+        <span class="modal-emoji">🎬</span>
+        <h2>Crear una sala</h2>
+        <p class="modal-sub">Serás el host: tú eliges los videos y controlas la reproducción.</p>
+        <label for="create-name">Tu nombre</label>
+        <input id="create-name" type="text" maxlength="24" placeholder="Ej: Daniel" autocomplete="nickname" />
+        <button class="btn btn-primary w-full" id="create-submit" type="button">Crear sala</button>
+      </div>
+
+      <div class="modal-panel hidden" id="panel-join">
+        <span class="modal-emoji">🚪</span>
+        <h2>Unirse a una sala</h2>
+        <p class="modal-sub">Pide el código o el link al host de la sala.</p>
+        <label for="join-name">Tu nombre</label>
+        <input id="join-name" type="text" maxlength="24" placeholder="Ej: Daniel" autocomplete="nickname" />
+        <label for="join-code">Código de sala</label>
+        <input id="join-code" class="code-input" type="text" maxlength="5" placeholder="A7K2P" autocomplete="off" spellcheck="false" />
+        <button class="btn btn-primary w-full" id="join-submit" type="button">Entrar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,1189 @@
+"use strict";
+
+/* ============================================================
+   MULTITUBE — cliente
+   ============================================================ */
+
+(() => {
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+  const socket = io();
+
+  const els = {
+    nav: $("#nav"),
+    conn: $("#conn-status"),
+    connText: $("#conn-text"),
+    viewHome: $("#view-home"),
+    viewRoom: $("#view-room"),
+    btnCreate: $("#btn-create"),
+    btnJoin: $("#btn-join"),
+    modal: $("#modal"),
+    modalClose: $("#modal-close"),
+    panelCreate: $("#panel-create"),
+    panelJoin: $("#panel-join"),
+    createName: $("#create-name"),
+    createSubmit: $("#create-submit"),
+    joinName: $("#join-name"),
+    joinCode: $("#join-code"),
+    joinSubmit: $("#join-submit"),
+    roomCode: $("#room-code"),
+    btnCopy: $("#btn-copy"),
+    btnLeave: $("#btn-leave"),
+    members: $("#members"),
+    memberCount: $("#member-count"),
+    playerWrap: $("#player-wrap"),
+    playerCover: $("#player-cover"),
+    coverText: $("#cover-text"),
+    playerGate: $("#player-gate"),
+    playerShield: $("#player-shield"),
+    soundPill: $("#sound-pill"),
+    btnPlay: $("#btn-play"),
+    btnNext: $("#btn-next"),
+    btnVol: $("#btn-vol"),
+    btnFs: $("#btn-fs"),
+    timeCurrent: $("#time-current"),
+    timeTotal: $("#time-total"),
+    seek: $("#seek"),
+    nowPlaying: $("#now-playing"),
+    hostHint: $("#host-hint"),
+    hostTools: $("#host-tools"),
+    apiKey: $("#api-key"),
+    btnSaveKey: $("#btn-save-key"),
+    searchInput: $("#search-input"),
+    btnSearch: $("#btn-search"),
+    searchResults: $("#search-results"),
+    urlInput: $("#url-input"),
+    btnAddUrl: $("#btn-add-url"),
+    queueList: $("#queue-list"),
+    queueCount: $("#queue-count"),
+    queueEmpty: $("#queue-empty"),
+    tabQueue: $("#tab-queue"),
+    tabChat: $("#tab-chat"),
+    chatMessages: $("#chat-messages"),
+    chatForm: $("#chat-form"),
+    chatInput: $("#chat-input"),
+    toast: $("#toast"),
+  };
+
+  const ICONS = {
+    play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>',
+    pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z" fill="currentColor"/></svg>',
+    volumeOn: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+    volumeOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="m16 9 5 5m0-5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  };
+
+  const state = {
+    youId: null,
+    room: null,
+    isHost: false,
+    player: null,
+    playerReady: false,
+    ytReady: false,
+    pendingSync: null,
+    pauseAfterLoad: null,
+    lastSync: null,
+    clock: { time: 0, at: Date.now(), playing: false },
+    seeking: false,
+    apiKey: localStorage.getItem("multitube:key") || "",
+    session: readSession(),
+    rendered: new Set(),
+  };
+
+  /* ------------------------------------------------------------
+     Utilidades
+     ------------------------------------------------------------ */
+
+  function readSession() {
+    try {
+      return JSON.parse(sessionStorage.getItem("multitube:session") || "null");
+    } catch {
+      return null;
+    }
+  }
+
+  function saveSession() {
+    if (state.session) {
+      sessionStorage.setItem("multitube:session", JSON.stringify(state.session));
+    }
+  }
+
+  function clearSession() {
+    state.session = null;
+    sessionStorage.removeItem("multitube:session");
+  }
+
+  function toast(message) {
+    els.toast.textContent = message;
+    els.toast.classList.add("show");
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => els.toast.classList.remove("show"), 3200);
+  }
+
+  function fmt(sec) {
+    let value = Number(sec);
+    if (!Number.isFinite(value) || value < 0) value = 0;
+    const s = Math.floor(value % 60);
+    const m = Math.floor((value / 60) % 60);
+    const h = Math.floor(value / 3600);
+    return h > 0
+      ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+      : `${m}:${String(s).padStart(2, "0")}`;
+  }
+
+  function fmtTime(timestamp) {
+    try {
+      return new Date(timestamp).toLocaleTimeString("es", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "";
+    }
+  }
+
+  function safe(fn, fallback) {
+    try {
+      const value = fn();
+      return Number.isFinite(value) ? value : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function initials(name) {
+    const parts = String(name || "?").trim().split(/\s+/).filter(Boolean);
+    return ((parts[0]?.[0] || "?") + (parts[1]?.[0] || "")).toUpperCase();
+  }
+
+  function hueFor(name) {
+    let hue = 0;
+    for (const char of String(name)) {
+      hue = (hue * 31 + char.codePointAt(0)) % 360;
+    }
+    return hue;
+  }
+
+  function decodeHtml(text) {
+    const area = document.createElement("textarea");
+    area.innerHTML = String(text || "");
+    return area.value;
+  }
+
+  function parseYouTubeId(input) {
+    const raw = String(input || "").trim();
+    if (/^[A-Za-z0-9_-]{11}$/.test(raw)) return raw;
+    const patterns = [
+      /(?:youtube\.com\/watch\?[^#]*\bv=)([A-Za-z0-9_-]{11})/,
+      /youtu\.be\/([A-Za-z0-9_-]{11})/,
+      /youtube\.com\/embed\/([A-Za-z0-9_-]{11})/,
+      /youtube\.com\/shorts\/([A-Za-z0-9_-]{11})/,
+      /youtube\.com\/live\/([A-Za-z0-9_-]{11})/,
+    ];
+    for (const pattern of patterns) {
+      const match = raw.match(pattern);
+      if (match) return match[1];
+    }
+    return null;
+  }
+
+  function emitAck(event, data, timeout = 9000) {
+    return new Promise((resolve) => {
+      socket.timeout(timeout).emit(event, data, (err, response) => {
+        if (err) {
+          resolve({ ok: false, error: "Sin respuesta del servidor. Revisa tu conexión." });
+          return;
+        }
+        resolve(
+          response && typeof response === "object"
+            ? response
+            : { ok: false, error: "Respuesta inválida del servidor." }
+        );
+      });
+    });
+  }
+
+  async function fetchOEmbed(videoId) {
+    try {
+      const target = encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`);
+      const response = await fetch(
+        `https://www.youtube.com/oembed?url=${target}&format=json`
+      );
+      if (!response.ok) return null;
+      return await response.json();
+    } catch {
+      return null;
+    }
+  }
+
+  /* ------------------------------------------------------------
+     Conexión
+     ------------------------------------------------------------ */
+
+  function setConnected(connected) {
+    els.conn.classList.toggle("online", connected);
+    els.connText.textContent = connected ? "En línea" : "Reconectando…";
+  }
+
+  function bindSocket() {
+    socket.on("connect", () => {
+      setConnected(true);
+      if (state.session && (!state.room || state.youId !== socket.id)) {
+        emitAck("room:join", state.session).then((response) => {
+          if (response.ok) {
+            onJoined(response, state.session.name, { silent: true });
+          } else {
+            clearSession();
+            if (state.room) goHome();
+          }
+        });
+      }
+    });
+
+    socket.on("disconnect", () => setConnected(false));
+    socket.on("connect_error", () => setConnected(false));
+
+    socket.on("room:state", (room) => {
+      if (!state.room) return;
+      applyRoomState(room);
+    });
+
+    socket.on("player:sync", handleSync);
+
+    socket.on("chat:message", renderMessage);
+
+    socket.on("host:changed", ({ hostName } = {}) => {
+      toast(`👑 ${hostName || "Alguien"} ahora es el host`);
+    });
+
+    socket.on("room:closed", ({ reason } = {}) => {
+      toast(reason || "La sala se cerró");
+      clearSession();
+      goHome();
+    });
+  }
+
+  /* ------------------------------------------------------------
+     Entrar / salir de la sala
+     ------------------------------------------------------------ */
+
+  async function createRoom() {
+    const name = els.createName.value.trim();
+    if (!name) return toast("Escribe tu nombre para crear la sala");
+
+    els.createSubmit.disabled = true;
+    const response = await emitAck("room:create", { name });
+    els.createSubmit.disabled = false;
+
+    if (!response.ok) return toast(response.error || "No se pudo crear la sala");
+    onJoined(response, name);
+  }
+
+  async function joinRoom() {
+    const name = els.joinName.value.trim();
+    const code = els.joinCode.value.trim().toUpperCase();
+    if (!name) return toast("Escribe tu nombre");
+    if (code.length < 4) return toast("Escribe el código de la sala");
+
+    els.joinSubmit.disabled = true;
+    const response = await emitAck("room:join", { name, code });
+    els.joinSubmit.disabled = false;
+
+    if (!response.ok) return toast(response.error || "No se pudo entrar a la sala");
+    onJoined(response, name);
+  }
+
+  function onJoined(response, name, { silent = false } = {}) {
+    state.youId = response.youId;
+    state.room = response.state;
+    state.isHost = response.state.hostId === response.youId;
+    state.session = { code: response.state.code, name };
+    saveSession();
+
+    state.rendered.clear();
+    els.chatMessages.innerHTML = "";
+
+    enterRoom();
+    applyRoomState(response.state);
+    (response.messages || []).forEach(renderMessage);
+    closeModal();
+
+    if (!state.isHost && state.playerReady) state.player.mute();
+    updateSoundPill();
+
+    if (!silent) {
+      toast(
+        state.isHost
+          ? `🎬 Sala ${response.state.code} creada`
+          : `🎉 Te uniste a la sala ${response.state.code}`
+      );
+    }
+  }
+
+  function enterRoom() {
+    els.viewHome.classList.add("hidden");
+    els.viewRoom.classList.remove("hidden");
+    document.body.classList.add("in-room");
+    ensurePlayer();
+    updateHostUI();
+  }
+
+  function leaveRoom() {
+    if (!window.confirm("¿Seguro que quieres salir de la sala?")) return;
+    socket.emit("room:leave");
+    clearSession();
+    goHome();
+  }
+
+  function goHome() {
+    state.room = null;
+    state.youId = null;
+    state.isHost = false;
+    state.lastSync = null;
+    state.pendingSync = null;
+    state.pauseAfterLoad = null;
+    state.clock = { time: 0, at: Date.now(), playing: false };
+    state.rendered.clear();
+
+    if (state.playerReady) {
+      try {
+        state.player.stopVideo();
+      } catch {}
+    }
+
+    els.chatMessages.innerHTML = "";
+    els.queueList.innerHTML = "";
+    els.searchResults.innerHTML = "";
+    els.nowPlaying.innerHTML = '<span class="np-empty">Nada reproduciéndose todavía</span>';
+    els.playerGate.classList.add("hidden");
+    els.soundPill.classList.add("hidden");
+    els.viewRoom.classList.add("hidden");
+    els.viewHome.classList.remove("hidden");
+    document.body.classList.remove("in-room", "is-host");
+    showCover(true);
+    history.replaceState(null, "", location.pathname);
+  }
+
+  /* ------------------------------------------------------------
+     Estado de la sala
+     ------------------------------------------------------------ */
+
+  function applyRoomState(room) {
+    if (!room) return;
+    state.room = room;
+    state.isHost = room.hostId === state.youId;
+
+    els.roomCode.textContent = room.code;
+    renderMembers(room.members || []);
+    renderQueue(room.queue || []);
+    renderNowPlaying(room.current);
+    updateHostUI();
+    showCover(!room.current);
+    syncFromState(room);
+  }
+
+  function syncFromState(room) {
+    if (!room) return;
+    if (room.current) {
+      const sync = {
+        videoId: room.current.videoId,
+        playing: room.playing,
+        time: room.time,
+        at: room.updatedAt,
+        reason: "state",
+      };
+      if (!state.lastSync || state.lastSync.videoId !== sync.videoId || !state.playerReady) {
+        handleSync(sync);
+      }
+    } else if (state.lastSync) {
+      handleSync({
+        videoId: null,
+        playing: false,
+        time: 0,
+        at: Date.now(),
+        reason: "state",
+      });
+    }
+  }
+
+  function updateHostUI() {
+    els.hostTools.classList.toggle("hidden", !state.isHost);
+    els.btnNext.classList.toggle("hidden", !state.isHost);
+    els.seek.disabled = !state.isHost;
+    els.hostHint.textContent = state.isHost
+      ? "👑 Eres el host: elige videos y controla la reproducción"
+      : "👀 Solo el host controla la reproducción";
+    document.body.classList.toggle("is-host", state.isHost);
+  }
+
+  function showCover(show) {
+    els.playerCover.classList.toggle("hidden", !show);
+    if (show) {
+      els.coverText.textContent = state.isHost
+        ? "Agrega un video para empezar"
+        : "Esperando a que el host ponga un video";
+    }
+  }
+
+  function renderMembers(members) {
+    els.members.innerHTML = "";
+    els.memberCount.textContent = members.length;
+
+    members.slice(0, 8).forEach((member) => {
+      const el = document.createElement("div");
+      el.className = "member";
+      el.style.setProperty("--h", String(hueFor(member.name)));
+      el.textContent = initials(member.name);
+      el.title = `${member.name}${member.isHost ? " · Host" : ""}`;
+
+      if (member.isHost) {
+        const crown = document.createElement("span");
+        crown.className = "crown";
+        crown.textContent = "👑";
+        el.appendChild(crown);
+      }
+      els.members.appendChild(el);
+    });
+
+    if (members.length > 8) {
+      const more = document.createElement("div");
+      more.className = "member";
+      more.style.setProperty("--h", "260");
+      more.textContent = `+${members.length - 8}`;
+      els.members.appendChild(more);
+    }
+  }
+
+  function renderQueue(queue) {
+    els.queueCount.textContent = queue.length;
+    els.queueEmpty.classList.toggle("hidden", queue.length > 0);
+    els.queueList.innerHTML = "";
+
+    queue.forEach((item) => {
+      const li = document.createElement("li");
+      li.className = "queue-item";
+
+      const img = document.createElement("img");
+      img.src = item.thumb;
+      img.alt = "";
+      img.loading = "lazy";
+
+      const info = document.createElement("div");
+      info.className = "q-info";
+      const title = document.createElement("strong");
+      title.textContent = item.title;
+      const author = document.createElement("small");
+      author.textContent = item.author || "YouTube";
+      info.append(title, author);
+
+      li.append(img, info);
+
+      if (state.isHost) {
+        li.classList.add("clickable");
+        li.title = "Reproducir ahora";
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "q-remove";
+        remove.textContent = "×";
+        remove.title = "Quitar de la cola";
+        remove.addEventListener("click", (event) => {
+          event.stopPropagation();
+          socket.emit("queue:remove", { id: item.id });
+        });
+        li.appendChild(remove);
+
+        li.addEventListener("click", () => {
+          socket.emit("player:playItem", { id: item.id });
+        });
+      }
+
+      els.queueList.appendChild(li);
+    });
+  }
+
+  function renderNowPlaying(current) {
+    if (!current) {
+      els.nowPlaying.innerHTML = '<span class="np-empty">Nada reproduciéndose todavía</span>';
+      return;
+    }
+
+    els.nowPlaying.innerHTML = "";
+
+    const label = document.createElement("span");
+    label.className = "np-label";
+    label.textContent = "AHORA";
+
+    const info = document.createElement("div");
+    info.className = "np-info";
+    const title = document.createElement("strong");
+    title.textContent = current.title;
+    const author = document.createElement("small");
+    author.textContent = current.author || "YouTube";
+    info.append(title, author);
+
+    els.nowPlaying.append(label, info);
+  }
+
+  /* ------------------------------------------------------------
+     Reproductor
+     ------------------------------------------------------------ */
+
+  function onYtReady() {
+    state.ytReady = true;
+    ensurePlayer();
+  }
+
+  function ensurePlayer() {
+    if (state.player || !state.room) return;
+    if (!window.YT || !window.YT.Player) return;
+
+    state.player = new window.YT.Player("yt-player", {
+      width: "100%",
+      height: "100%",
+      videoId: "",
+      playerVars: {
+        autoplay: 0,
+        controls: 0,
+        disablekb: 1,
+        modestbranding: 1,
+        rel: 0,
+        playsinline: 1,
+        iv_load_policy: 3,
+        fs: 0,
+        origin: location.origin,
+      },
+      events: {
+        onReady: onPlayerReady,
+        onStateChange: onPlayerStateChange,
+        onError: onPlayerError,
+      },
+    });
+  }
+
+  function onPlayerReady() {
+    state.playerReady = true;
+    if (!state.isHost) {
+      try {
+        state.player.mute();
+      } catch {}
+    }
+    if (state.pendingSync) {
+      const pending = state.pendingSync;
+      state.pendingSync = null;
+      handleSync(pending);
+    }
+    updateSoundPill();
+    tick();
+  }
+
+  function onPlayerStateChange(event) {
+    if (event.data === 0) {
+      if (state.isHost && state.room?.current) socket.emit("player:next");
+    }
+
+    if (event.data === 1) {
+      els.playerGate.classList.add("hidden");
+      if (state.pauseAfterLoad != null && state.playerReady) {
+        const target = state.pauseAfterLoad;
+        state.pauseAfterLoad = null;
+        try {
+          state.player.seekTo(target, true);
+          state.player.pauseVideo();
+        } catch {}
+      }
+    }
+
+    updatePlayIcon();
+    updateSoundPill();
+  }
+
+  function onPlayerError(event) {
+    const code = event.data;
+    let message = "No se pudo reproducir este video.";
+    if (code === 101 || code === 150) {
+      message = "Este video no permite reproducción incrustada.";
+    } else if (code === 100) {
+      message = "El video no existe o es privado.";
+    }
+    toast(`⚠️ ${message}`);
+
+    if (state.isHost && state.room?.current) {
+      setTimeout(() => {
+        if (state.room?.current) socket.emit("player:next");
+      }, 1500);
+    }
+  }
+
+  function handleSync(sync) {
+    state.lastSync = sync;
+    state.clock = { time: sync.time, at: sync.at, playing: Boolean(sync.playing) };
+
+    if (state.room) {
+      state.room.playing = sync.playing;
+      state.room.time = sync.time;
+      state.room.updatedAt = sync.at;
+    }
+
+    if (!sync.videoId) {
+      state.pendingSync = null;
+      state.pauseAfterLoad = null;
+      showCover(true);
+      renderNowPlaying(null);
+      if (state.playerReady) {
+        try {
+          state.player.stopVideo();
+        } catch {}
+      }
+      updateSoundPill();
+      return;
+    }
+
+    showCover(false);
+
+    if (state.isHost && sync.reason !== "load") {
+      updateSoundPill();
+      return;
+    }
+
+    if (!state.playerReady) {
+      state.pendingSync = sync;
+      return;
+    }
+
+    const player = state.player;
+    const target = sync.playing
+      ? sync.time + (Date.now() - sync.at) / 1000
+      : sync.time;
+
+    let currentId = "";
+    try {
+      currentId = player.getVideoData()?.video_id || "";
+    } catch {}
+
+    if (currentId !== sync.videoId) {
+      state.pauseAfterLoad = sync.playing ? null : target;
+      player.loadVideoById({
+        videoId: sync.videoId,
+        startSeconds: Math.max(0, target),
+      });
+      if (!state.isHost) {
+        try {
+          player.mute();
+        } catch {}
+      }
+      updateSoundPill();
+      return;
+    }
+
+    if (sync.playing) {
+      if (Math.abs(player.getCurrentTime() - target) > 1.2) {
+        player.seekTo(Math.max(0, target), true);
+      }
+      const playerState = player.getPlayerState();
+      if (playerState !== 1 && playerState !== 3) player.playVideo();
+    } else {
+      if (player.getPlayerState() === 1) player.pauseVideo();
+      if (Math.abs(player.getCurrentTime() - target) > 0.6) {
+        player.seekTo(Math.max(0, target), true);
+      }
+    }
+
+    updateSoundPill();
+  }
+
+  function togglePlay() {
+    if (!state.room?.current || !state.playerReady) return;
+
+    if (state.isHost) {
+      if (state.player.getPlayerState() === 1) {
+        state.player.pauseVideo();
+        socket.emit("player:pause", { time: state.player.getCurrentTime() });
+      } else {
+        state.player.playVideo();
+        socket.emit("player:play", { time: state.player.getCurrentTime() });
+      }
+    } else {
+      resync();
+    }
+  }
+
+  function resync() {
+    if (!state.playerReady || !state.lastSync?.videoId) return;
+    const sync = state.lastSync;
+    const target = sync.playing
+      ? sync.time + (Date.now() - sync.at) / 1000
+      : sync.time;
+    state.player.seekTo(Math.max(0, target), true);
+    if (sync.playing) state.player.playVideo();
+    els.playerGate.classList.add("hidden");
+    toast("🔄 Sincronizado");
+  }
+
+  function updatePlayIcon() {
+    if (!state.playerReady) {
+      els.btnPlay.innerHTML = ICONS.play;
+      return;
+    }
+    const playing = state.player.getPlayerState() === 1;
+    els.btnPlay.innerHTML = playing ? ICONS.pause : ICONS.play;
+    els.btnPlay.title = state.isHost
+      ? playing
+        ? "Pausar"
+        : "Reproducir"
+      : "Sincronizar";
+  }
+
+  function updateSoundPill() {
+    if (!state.playerReady || !state.room?.current) {
+      els.soundPill.classList.add("hidden");
+      return;
+    }
+    let muted = false;
+    try {
+      muted = state.player.isMuted();
+    } catch {}
+    els.soundPill.classList.toggle("hidden", !muted);
+    els.btnVol.innerHTML = muted ? ICONS.volumeOff : ICONS.volumeOn;
+  }
+
+  function toggleMute() {
+    if (!state.playerReady) return;
+    try {
+      if (state.player.isMuted()) {
+        state.player.unMute();
+        state.player.setVolume(100);
+      } else {
+        state.player.mute();
+      }
+    } catch {}
+    updateSoundPill();
+  }
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.();
+    } else {
+      els.playerWrap.requestFullscreen?.().catch(() => {});
+    }
+  }
+
+  function tick() {
+    if (!state.room || !state.playerReady) return;
+    const player = state.player;
+    const current = safe(() => player.getCurrentTime(), 0);
+    const duration = safe(() => player.getDuration(), 0);
+
+    if (!state.seeking) {
+      const max = duration || 100;
+      els.seek.max = String(max);
+      els.seek.value = String(Math.min(current, max));
+      els.seek.style.setProperty(
+        "--p",
+        `${duration ? (current / duration) * 100 : 0}%`
+      );
+    }
+
+    els.timeCurrent.textContent = fmt(current);
+    els.timeTotal.textContent = duration ? fmt(duration) : "0:00";
+    updatePlayIcon();
+    updateSoundPill();
+  }
+
+  function hostHeartbeat() {
+    if (!state.isHost || !state.room?.current || !state.room.playing) return;
+    if (!state.playerReady) return;
+    if (state.player.getPlayerState() !== 1) return;
+    socket.emit("player:heartbeat", { time: state.player.getCurrentTime() });
+  }
+
+  /* ------------------------------------------------------------
+     Chat
+     ------------------------------------------------------------ */
+
+  function renderMessage(message) {
+    if (!message || !message.id || state.rendered.has(message.id)) return;
+    state.rendered.add(message.id);
+
+    const wrapper = document.createElement("div");
+
+    if (message.type === "system") {
+      wrapper.className = "msg system";
+      wrapper.textContent = message.text;
+    } else {
+      const mine = message.fromId === state.youId;
+      wrapper.className = `msg${mine ? " mine" : ""}`;
+
+      const head = document.createElement("div");
+      head.className = "msg-head";
+
+      const name = document.createElement("span");
+      name.className = "msg-name";
+      name.textContent = mine ? "Tú" : message.name;
+
+      const time = document.createElement("span");
+      time.className = "msg-time";
+      time.textContent = fmtTime(message.at);
+
+      head.append(name, time);
+
+      const body = document.createElement("div");
+      body.className = "msg-body";
+      body.textContent = message.text;
+
+      wrapper.append(head, body);
+    }
+
+    els.chatMessages.appendChild(wrapper);
+    els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
+  }
+
+  /* ------------------------------------------------------------
+     Búsqueda y cola
+     ------------------------------------------------------------ */
+
+  async function addVideo(video) {
+    if (!state.isHost) return { ok: false, error: "Solo el host puede agregar videos." };
+    const response = await emitAck("queue:add", { video });
+    if (response.ok) toast("✅ Agregado a la cola");
+    else toast(response.error || "No se pudo agregar el video");
+    return response;
+  }
+
+  async function search() {
+    const query = els.searchInput.value.trim();
+    if (!query) return;
+
+    if (!state.apiKey) {
+      toast("🔑 Guarda tu API key de YouTube para buscar");
+      els.apiKey.focus();
+      return;
+    }
+
+    els.searchResults.innerHTML = '<div class="search-loading">Buscando…</div>';
+
+    try {
+      const params = new URLSearchParams({
+        part: "snippet",
+        type: "video",
+        maxResults: "12",
+        videoEmbeddable: "true",
+        q: query,
+        key: state.apiKey,
+      });
+
+      const response = await fetch(
+        `https://www.googleapis.com/youtube/v3/search?${params.toString()}`
+      );
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data?.error?.message || `Error ${response.status}`);
+      }
+
+      const items = (data.items || [])
+        .map((item) => ({
+          videoId: item.id?.videoId,
+          title: decodeHtml(item.snippet?.title || ""),
+          author: decodeHtml(item.snippet?.channelTitle || ""),
+          thumb:
+            item.snippet?.thumbnails?.medium?.url ||
+            item.snippet?.thumbnails?.default?.url ||
+            "",
+        }))
+        .filter((item) => item.videoId);
+
+      renderResults(items);
+    } catch (error) {
+      els.searchResults.innerHTML = "";
+      const box = document.createElement("div");
+      box.className = "search-error";
+      box.textContent = `No se pudo buscar: ${error.message}`;
+      els.searchResults.appendChild(box);
+    }
+  }
+
+  function renderResults(items) {
+    els.searchResults.innerHTML = "";
+
+    if (!items.length) {
+      els.searchResults.innerHTML = '<div class="search-loading">Sin resultados.</div>';
+      return;
+    }
+
+    items.forEach((video) => {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "result";
+
+      const img = document.createElement("img");
+      img.src = video.thumb;
+      img.alt = "";
+      img.loading = "lazy";
+
+      const info = document.createElement("span");
+      info.className = "r-info";
+
+      const title = document.createElement("strong");
+      title.textContent = video.title;
+
+      const author = document.createElement("small");
+      author.textContent = video.author;
+
+      info.append(title, author);
+
+      const add = document.createElement("span");
+      add.className = "r-add";
+      add.textContent = "+";
+
+      card.append(img, info, add);
+
+      card.addEventListener("click", async () => {
+        card.classList.add("adding");
+        const response = await addVideo(video);
+        card.classList.remove("adding");
+        if (response.ok) card.remove();
+      });
+
+      els.searchResults.appendChild(card);
+    });
+  }
+
+  async function addFromUrl() {
+    if (!state.isHost) return;
+
+    const raw = els.urlInput.value.trim();
+    if (!raw) return;
+
+    const videoId = parseYouTubeId(raw);
+    if (!videoId) return toast("❌ Link de YouTube inválido");
+
+    els.btnAddUrl.disabled = true;
+    const meta = await fetchOEmbed(videoId);
+    const response = await addVideo({
+      videoId,
+      title: meta?.title || "Video de YouTube",
+      author: meta?.author_name || "",
+    });
+    els.btnAddUrl.disabled = false;
+
+    if (response.ok) els.urlInput.value = "";
+  }
+
+  /* ------------------------------------------------------------
+     Modal
+     ------------------------------------------------------------ */
+
+  function openModal(which) {
+    els.modal.classList.remove("hidden");
+    document.body.classList.add("modal-open");
+    els.panelCreate.classList.toggle("hidden", which !== "create");
+    els.panelJoin.classList.toggle("hidden", which !== "join");
+
+    setTimeout(() => {
+      (which === "create" ? els.createName : els.joinName).focus();
+    }, 60);
+  }
+
+  function closeModal() {
+    els.modal.classList.add("hidden");
+    document.body.classList.remove("modal-open");
+  }
+
+  /* ------------------------------------------------------------
+     Eventos de UI
+     ------------------------------------------------------------ */
+
+  function bindUI() {
+    els.btnCreate.addEventListener("click", () => openModal("create"));
+    els.btnJoin.addEventListener("click", () => openModal("join"));
+    els.modalClose.addEventListener("click", closeModal);
+
+    els.modal.addEventListener("click", (event) => {
+      if (event.target === els.modal) closeModal();
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeModal();
+    });
+
+    els.createSubmit.addEventListener("click", createRoom);
+    els.joinSubmit.addEventListener("click", joinRoom);
+
+    els.createName.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") createRoom();
+    });
+
+    [els.joinName, els.joinCode].forEach((input) => {
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") joinRoom();
+      });
+    });
+
+    els.joinCode.addEventListener("input", () => {
+      els.joinCode.value = els.joinCode.value
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, "")
+        .slice(0, 5);
+    });
+
+    els.btnCopy.addEventListener("click", copyLink);
+    els.btnLeave.addEventListener("click", leaveRoom);
+
+    els.btnPlay.addEventListener("click", togglePlay);
+    els.btnNext.addEventListener("click", () => {
+      if (state.isHost) socket.emit("player:next");
+    });
+    els.btnVol.addEventListener("click", toggleMute);
+    els.btnFs.addEventListener("click", toggleFullscreen);
+
+    els.playerShield.addEventListener("click", () => {
+      if (!state.room?.current) return;
+      if (state.isHost) togglePlay();
+      else toast("👑 Solo el host controla la reproducción");
+    });
+
+    els.playerGate.addEventListener("click", () => {
+      els.playerGate.classList.add("hidden");
+      if (!state.playerReady) return;
+      try {
+        state.player.unMute();
+        state.player.setVolume(100);
+      } catch {}
+      updateSoundPill();
+      resync();
+    });
+
+    els.soundPill.addEventListener("click", () => {
+      if (!state.playerReady) return;
+      try {
+        state.player.unMute();
+        state.player.setVolume(100);
+      } catch {}
+      updateSoundPill();
+      if (state.lastSync?.playing) state.player.playVideo();
+    });
+
+    els.seek.addEventListener("input", () => {
+      if (!state.isHost) return;
+      state.seeking = true;
+      els.timeCurrent.textContent = fmt(Number(els.seek.value));
+    });
+
+    els.seek.addEventListener("change", () => {
+      if (!state.isHost) {
+        state.seeking = false;
+        return;
+      }
+      const time = Number(els.seek.value);
+      state.seeking = false;
+      if (state.playerReady) state.player.seekTo(time, true);
+      socket.emit("player:seek", { time });
+    });
+
+    $$(".tab-btn").forEach((button) => {
+      button.addEventListener("click", () => {
+        $$(".tab-btn").forEach((tab) =>
+          tab.classList.toggle("active", tab === button)
+        );
+        const isQueue = button.dataset.tab === "queue";
+        els.tabQueue.classList.toggle("hidden", !isQueue);
+        els.tabChat.classList.toggle("hidden", isQueue);
+      });
+    });
+
+    els.btnSaveKey.addEventListener("click", () => {
+      const key = els.apiKey.value.trim();
+      state.apiKey = key;
+      if (key) localStorage.setItem("multitube:key", key);
+      else localStorage.removeItem("multitube:key");
+      toast(key ? "🔑 API key guardada en este navegador" : "API key eliminada");
+    });
+
+    els.btnSearch.addEventListener("click", search);
+    els.searchInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        search();
+      }
+    });
+
+    els.btnAddUrl.addEventListener("click", addFromUrl);
+    els.urlInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        addFromUrl();
+      }
+    });
+
+    els.chatForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const text = els.chatInput.value.trim();
+      if (!text) return;
+      socket.emit("chat:send", { text });
+      els.chatInput.value = "";
+    });
+
+    window.addEventListener(
+      "scroll",
+      () => els.nav.classList.toggle("scrolled", window.scrollY > 8),
+      { passive: true }
+    );
+  }
+
+  async function copyLink() {
+    if (!state.room) return;
+    const url = `${location.origin}${location.pathname}?room=${state.room.code}`;
+
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("🔗 Link copiado · compártelo con tus amigos");
+      return;
+    } catch {}
+
+    const area = document.createElement("textarea");
+    area.value = url;
+    document.body.appendChild(area);
+    area.select();
+    try {
+      document.execCommand("copy");
+      toast("🔗 Link copiado");
+    } catch {
+      toast(url);
+    }
+    area.remove();
+  }
+
+  /* ------------------------------------------------------------
+     Init
+     ------------------------------------------------------------ */
+
+  function init() {
+    bindUI();
+    bindSocket();
+
+    if (state.apiKey) els.apiKey.value = state.apiKey;
+
+    const params = new URLSearchParams(location.search);
+    const roomParam = (params.get("room") || "")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "")
+      .slice(0, 5);
+
+    if (roomParam) {
+      if (state.session && state.session.code !== roomParam) clearSession();
+      if (!state.session) {
+        openModal("join");
+        els.joinCode.value = roomParam;
+      }
+    }
+
+    window.onYouTubeIframeAPIReady = onYtReady;
+    if (window.YT && window.YT.Player) onYtReady();
+
+    setInterval(tick, 400);
+    setInterval(hostHeartbeat, 5000);
+  }
+
+  init();
+})();
