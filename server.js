@@ -87,6 +87,9 @@ function serializeRoom(room) {
     time: room.time,
     updatedAt: room.updatedAt,
     queue: room.queue,
+    suggestions: room.suggestions,
+    hasKey: Boolean(room.apiKey),
+    shareKey: room.shareKey,
     members: [...room.members.entries()].map(([id, member]) => ({
       id,
       name: member.name,
@@ -147,12 +150,16 @@ function createRoom(socket, name) {
     hostId: socket.id,
     members: new Map([[socket.id, { name, joinedAt: Date.now() }]]),
     queue: [],
+    suggestions: [],
     current: null,
     playing: false,
     time: 0,
     updatedAt: Date.now(),
     createdAt: Date.now(),
     chat: [],
+    apiKey: null,
+    shareKey: true,
+    searchCache: new Map(),
   };
   rooms.set(room.code, room);
   joinSocketToRoom(socket, room);
@@ -208,6 +215,11 @@ function leaveRoom(socket, announce = true) {
   }
 
   if (room.hostId === socket.id) {
+    // Privacidad: la key del host no se hereda al siguiente host.
+    room.apiKey = null;
+    room.shareKey = false;
+    room.searchCache.clear();
+
     const next = [...room.members.entries()].sort(
       (a, b) => a[1].joinedAt - b[1].joinedAt
     )[0];
@@ -228,6 +240,157 @@ function leaveRoom(socket, announce = true) {
 function parseArgs(payload, ack) {
   if (typeof payload === "function") return [{}, payload];
   return [payload || {}, typeof ack === "function" ? ack : () => {}];
+}
+
+/* ------------------------------------------------------------------ */
+/* YouTube search (server-side, la key nunca sale al cliente)         */
+/* ------------------------------------------------------------------ */
+
+function decodeEntities(text) {
+  return String(text || "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+function isoDurationToSeconds(iso) {
+  const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(String(iso || ""));
+  if (!match) return 0;
+  return (
+    (Number(match[1]) || 0) * 3600 +
+    (Number(match[2]) || 0) * 60 +
+    (Number(match[3]) || 0)
+  );
+}
+
+function formatDuration(seconds) {
+  const total = Math.max(0, Math.floor(seconds || 0));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+    : `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function formatViews(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "";
+  const compact = (num, suffix) => {
+    const text = num.toFixed(1).replace(".", ",").replace(",0", "");
+    return `${text} ${suffix} de vistas`;
+  };
+  if (n >= 1e9) return compact(n / 1e9, "mil M");
+  if (n >= 1e6) return compact(n / 1e6, "M");
+  if (n >= 1e3) return compact(n / 1e3, "mil");
+  return `${n} vistas`;
+}
+
+function timeAgo(iso) {
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return "";
+  const diff = Math.max(0, Date.now() - then);
+  const units = [
+    [31536000000, "año", "años"],
+    [2592000000, "mes", "meses"],
+    [604800000, "semana", "semanas"],
+    [86400000, "día", "días"],
+    [3600000, "hora", "horas"],
+    [60000, "minuto", "minutos"],
+  ];
+  for (const [ms, one, many] of units) {
+    const value = Math.floor(diff / ms);
+    if (value >= 1) return `hace ${value} ${value === 1 ? one : many}`;
+  }
+  return "hace un momento";
+}
+
+async function searchYouTube(apiKey, query, pageToken) {
+  const params = new URLSearchParams({
+    part: "snippet",
+    type: "video",
+    maxResults: "50",
+    videoEmbeddable: "true",
+    q: query,
+    key: apiKey,
+  });
+  if (pageToken) params.set("pageToken", pageToken);
+
+  let response;
+  try {
+    response = await fetch(
+      `https://www.googleapis.com/youtube/v3/search?${params.toString()}`
+    );
+  } catch {
+    throw new Error("No se pudo conectar con YouTube.");
+  }
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const reason = data?.error?.errors?.[0]?.reason || "";
+    if (reason === "quotaExceeded" || reason === "dailyLimitExceeded") {
+      throw new Error("La cuota diaria de la API key se agotó. Prueba mañana o usa otra key.");
+    }
+    if (reason === "keyInvalid" || reason === "badRequest") {
+      throw new Error("La API key no es válida. Revísala en Google Cloud.");
+    }
+    if (reason === "ipRefererBlocked" || reason === "forbidden") {
+      throw new Error("La API key tiene restricciones que bloquean esta búsqueda.");
+    }
+    throw new Error(data?.error?.message || "YouTube rechazó la búsqueda.");
+  }
+
+  const items = (data.items || [])
+    .map((item) => ({
+      videoId: item.id?.videoId,
+      title: decodeEntities(item.snippet?.title || "Video de YouTube"),
+      author: decodeEntities(item.snippet?.channelTitle || ""),
+      thumb:
+        item.snippet?.thumbnails?.medium?.url ||
+        item.snippet?.thumbnails?.default?.url ||
+        `https://i.ytimg.com/vi/${item.id?.videoId}/mqdefault.jpg`,
+      publishedAt: item.snippet?.publishedAt || "",
+    }))
+    .filter((item) => item.videoId);
+
+  const ids = items.map((item) => item.videoId);
+  if (ids.length) {
+    try {
+      const detailParams = new URLSearchParams({
+        part: "contentDetails,statistics",
+        id: ids.join(","),
+        key: apiKey,
+      });
+      const detailResponse = await fetch(
+        `https://www.googleapis.com/youtube/v3/videos?${detailParams.toString()}`
+      );
+      if (detailResponse.ok) {
+        const detailData = await detailResponse.json();
+        const byId = new Map(
+          (detailData.items || []).map((video) => [video.id, video])
+        );
+        for (const item of items) {
+          const detail = byId.get(item.videoId);
+          if (!detail) continue;
+          item.duration = formatDuration(
+            isoDurationToSeconds(detail.contentDetails?.duration)
+          );
+          item.views = formatViews(detail.statistics?.viewCount);
+        }
+      }
+    } catch {
+      /* los detalles son opcionales */
+    }
+  }
+
+  for (const item of items) {
+    item.ago = timeAgo(item.publishedAt);
+  }
+
+  return { items, nextPageToken: data.nextPageToken || null };
 }
 
 /* ------------------------------------------------------------------ */
@@ -399,6 +562,193 @@ io.on("connection", (socket) => {
       text,
       at: now,
     });
+  });
+
+  /* ----------------------------------------------------------------
+     API key compartida (se guarda en memoria, nunca se envía al cliente)
+     ---------------------------------------------------------------- */
+  socket.on("key:set", (payload, ack) => {
+    const [data, respond] = parseArgs(payload, ack);
+    const room = hostRoom(socket);
+    if (!room) {
+      return respond({ ok: false, error: "Solo el host puede configurar la API key." });
+    }
+
+    const key = String(data.key || "").trim();
+    if (key && !/^[A-Za-z0-9_-]{20,200}$/.test(key)) {
+      return respond({ ok: false, error: "Esa no parece una API key válida." });
+    }
+
+    room.apiKey = key || null;
+    room.shareKey = Boolean(data.share);
+    room.searchCache.clear();
+    broadcastState(room);
+    respond({ ok: true, hasKey: Boolean(room.apiKey), shareKey: room.shareKey });
+  });
+
+  socket.on("search:query", async (payload, ack) => {
+    const [data, respond] = parseArgs(payload, ack);
+    const room = getRoom(socket);
+    if (!room) return respond({ ok: false, error: "No estás en una sala." });
+    if (!room.apiKey) {
+      return respond({ ok: false, error: "El host aún no configuró su API key." });
+    }
+    if (room.hostId !== socket.id && !room.shareKey) {
+      return respond({ ok: false, error: "El host no comparte su API key con los invitados." });
+    }
+
+    const query = clean(data.q, 120);
+    const pageToken = String(data.pageToken || "").trim() || null;
+    if (!query) return respond({ ok: false, error: "Escribe algo para buscar." });
+
+    const now = Date.now();
+    if (!pageToken && now - (socket.data.lastSearch || 0) < 1200) {
+      return respond({ ok: false, error: "Espera un momento antes de buscar de nuevo." });
+    }
+    if (!pageToken) socket.data.lastSearch = now;
+
+    const cacheKey = query.toLowerCase();
+    if (!pageToken) {
+      const cached = room.searchCache.get(cacheKey);
+      if (cached && now - cached.at < 10 * 60 * 1000) {
+        return respond({
+          ok: true,
+          items: cached.items,
+          nextPageToken: cached.nextPageToken,
+          cached: true,
+        });
+      }
+    }
+
+    try {
+      const result = await searchYouTube(room.apiKey, query, pageToken);
+      if (!pageToken) {
+        room.searchCache.set(cacheKey, {
+          at: now,
+          items: result.items,
+          nextPageToken: result.nextPageToken,
+        });
+        if (room.searchCache.size > 20) {
+          room.searchCache.delete(room.searchCache.keys().next().value);
+        }
+      }
+      respond({ ok: true, items: result.items, nextPageToken: result.nextPageToken });
+    } catch (error) {
+      respond({ ok: false, error: error.message || "No se pudo buscar en YouTube." });
+    }
+  });
+
+  /* ----------------------------------------------------------------
+     Sugerencias de invitados
+     ---------------------------------------------------------------- */
+  socket.on("suggest:add", (payload, ack) => {
+    const [data, respond] = parseArgs(payload, ack);
+    const room = getRoom(socket);
+    if (!room) return respond({ ok: false, error: "No estás en una sala." });
+    if (room.suggestions.length >= 30) {
+      return respond({ ok: false, error: "Hay demasiadas sugerencias pendientes." });
+    }
+
+    const item = sanitizeVideo(data.video);
+    if (!item) return respond({ ok: false, error: "Video inválido." });
+
+    const duplicate =
+      room.current?.videoId === item.videoId ||
+      room.queue.some((video) => video.videoId === item.videoId) ||
+      room.suggestions.some((video) => video.videoId === item.videoId);
+    if (duplicate) {
+      return respond({ ok: false, error: "Ese video ya está en la sala." });
+    }
+
+    const member = room.members.get(socket.id);
+    const suggestion = {
+      ...item,
+      fromId: socket.id,
+      fromName: member?.name || "Anónimo",
+      at: Date.now(),
+    };
+
+    room.suggestions.push(suggestion);
+    respond({ ok: true, suggestion });
+    broadcastState(room);
+  });
+
+  socket.on("suggest:accept", (payload, ack) => {
+    const [data, respond] = parseArgs(payload, ack);
+    const room = hostRoom(socket);
+    if (!room) {
+      return respond({ ok: false, error: "Solo el host puede aceptar sugerencias." });
+    }
+
+    const id = String(data.id || "");
+    const index = room.suggestions.findIndex((item) => item.id === id);
+    if (index === -1) {
+      return respond({ ok: false, error: "Esa sugerencia ya no existe." });
+    }
+
+    const [suggestion] = room.suggestions.splice(index, 1);
+    const item = {
+      id: suggestion.id,
+      videoId: suggestion.videoId,
+      title: suggestion.title,
+      author: suggestion.author,
+      thumb: suggestion.thumb,
+    };
+
+    if (!room.current) {
+      room.current = item;
+      room.playing = true;
+      room.time = 0;
+      room.updatedAt = Date.now();
+      emitSync(room, "load");
+    } else {
+      room.queue.push(item);
+    }
+
+    respond({ ok: true, item });
+    broadcastState(room);
+    io.to(roomKey(room.code)).emit("suggest:resolved", {
+      id,
+      status: "accepted",
+      title: item.title,
+      by: room.members.get(socket.id)?.name || "El host",
+    });
+  });
+
+  socket.on("suggest:reject", (payload, ack) => {
+    const [data, respond] = parseArgs(payload, ack);
+    const room = hostRoom(socket);
+    if (!room) {
+      return respond({ ok: false, error: "Solo el host puede rechazar sugerencias." });
+    }
+
+    const id = String(data.id || "");
+    const index = room.suggestions.findIndex((item) => item.id === id);
+    if (index === -1) {
+      return respond({ ok: false, error: "Esa sugerencia ya no existe." });
+    }
+
+    const [suggestion] = room.suggestions.splice(index, 1);
+    respond({ ok: true });
+    broadcastState(room);
+    io.to(roomKey(room.code)).emit("suggest:resolved", {
+      id,
+      status: "rejected",
+      title: suggestion.title,
+      by: room.members.get(socket.id)?.name || "El host",
+    });
+  });
+
+  socket.on("suggest:remove", (payload) => {
+    const room = getRoom(socket);
+    if (!room) return;
+    const id = String(payload?.id || "");
+    const index = room.suggestions.findIndex((item) => item.id === id);
+    if (index === -1) return;
+    const suggestion = room.suggestions[index];
+    if (room.hostId !== socket.id && suggestion.fromId !== socket.id) return;
+    room.suggestions.splice(index, 1);
+    broadcastState(room);
   });
 
   socket.on("disconnect", () => leaveRoom(socket, true));

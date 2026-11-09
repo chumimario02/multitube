@@ -7,6 +7,9 @@ Mira YouTube **sincronizado** con tus amigos. Crea una sala, comparte el link y 
 - **Salas con código** de 5 caracteres y link de invitación.
 - **Host único**: solo el host controla la reproducción (play/pausa/seek/siguiente).
 - **Cola de videos** con búsqueda en YouTube y soporte para pegar links.
+- **Buscador inmersivo** estilo YouTube (pantalla completa, chips, vistas, duración, scroll infinito).
+- **API key compartida**: el host la guarda una vez y los invitados buscan con ella (toggle).
+- **Sugerencias**: los invitados proponen videos y el host los acepta o rechaza.
 - **Sincronización real** con heartbeat y corrección automática de desfase.
 - **Chat en vivo** y lista de miembros.
 - **Cambio de host automático** si el host se sale.

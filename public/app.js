@@ -50,19 +50,41 @@
     hostTools: $("#host-tools"),
     apiKey: $("#api-key"),
     btnSaveKey: $("#btn-save-key"),
-    searchInput: $("#search-input"),
-    btnSearch: $("#btn-search"),
-    searchResults: $("#search-results"),
+    shareKey: $("#share-key"),
+    btnOpenSearch: $("#btn-open-search"),
+    guestNote: $("#guest-note"),
     urlInput: $("#url-input"),
     btnAddUrl: $("#btn-add-url"),
     queueList: $("#queue-list"),
     queueCount: $("#queue-count"),
     queueEmpty: $("#queue-empty"),
     tabQueue: $("#tab-queue"),
+    tabSuggest: $("#tab-suggest"),
     tabChat: $("#tab-chat"),
+    suggestList: $("#suggest-list"),
+    suggestCount: $("#suggest-count"),
+    suggestEmpty: $("#suggest-empty"),
     chatMessages: $("#chat-messages"),
     chatForm: $("#chat-form"),
     chatInput: $("#chat-input"),
+    immersive: $("#immersive"),
+    ytClose: $("#yt-close"),
+    ytClose2: $("#yt-close-2"),
+    ytSearchForm: $("#yt-search-form"),
+    ytSearchInput: $("#yt-search-input"),
+    ytMode: $("#yt-mode"),
+    ytMain: $("#yt-main"),
+    ytChips: $("#yt-chips"),
+    ytStatus: $("#yt-status"),
+    ytGrid: $("#yt-grid"),
+    ytEmpty: $("#yt-empty"),
+    ytGate: $("#yt-gate"),
+    ytGateTitle: $("#yt-gate-title"),
+    ytGateText: $("#yt-gate-text"),
+    ytGateRow: $("#yt-gate-row"),
+    ytGateInput: $("#yt-gate-input"),
+    ytGateSave: $("#yt-gate-save"),
+    ytGateBack: $("#yt-gate-back"),
     toast: $("#toast"),
   };
 
@@ -86,6 +108,10 @@
     clock: { time: 0, at: Date.now(), playing: false },
     seeking: false,
     apiKey: localStorage.getItem("multitube:key") || "",
+    shareKey: localStorage.getItem("multitube:share") !== "0",
+    ytNextToken: null,
+    ytLoadingMore: false,
+    ytQuery: "",
     session: readSession(),
     rendered: new Set(),
   };
@@ -252,8 +278,24 @@
 
     socket.on("chat:message", renderMessage);
 
-    socket.on("host:changed", ({ hostName } = {}) => {
-      toast(`👑 ${hostName || "Alguien"} ahora es el host`);
+    socket.on("host:changed", ({ hostId, hostName } = {}) => {
+      if (hostId === state.youId) {
+        toast("👑 Ahora eres el host");
+        if (state.apiKey) {
+          emitAck("key:set", { key: state.apiKey, share: state.shareKey });
+        }
+      } else {
+        toast(`👑 ${hostName || "Alguien"} ahora es el host`);
+      }
+    });
+
+    socket.on("suggest:resolved", ({ status, title, by } = {}) => {
+      if (!title) return;
+      if (status === "accepted") {
+        toast(`✅ ${by || "El host"} aceptó: ${title}`);
+      } else if (status === "rejected") {
+        toast(`❌ ${by || "El host"} rechazó: ${title}`);
+      }
     });
 
     socket.on("room:closed", ({ reason } = {}) => {
@@ -308,8 +350,12 @@
     (response.messages || []).forEach(renderMessage);
     closeModal();
 
+    if (state.isHost && state.apiKey) {
+      emitAck("key:set", { key: state.apiKey, share: state.shareKey });
+    }
     if (!state.isHost && state.playerReady) state.player.mute();
     updateSoundPill();
+    updateKeyUI();
 
     if (!silent) {
       toast(
@@ -353,10 +399,12 @@
 
     els.chatMessages.innerHTML = "";
     els.queueList.innerHTML = "";
-    els.searchResults.innerHTML = "";
+    els.suggestList.innerHTML = "";
+    els.suggestCount.textContent = "0";
     els.nowPlaying.innerHTML = '<span class="np-empty">Nada reproduciéndose todavía</span>';
     els.playerGate.classList.add("hidden");
     els.soundPill.classList.add("hidden");
+    closeImmersive();
     els.viewRoom.classList.add("hidden");
     els.viewHome.classList.remove("hidden");
     document.body.classList.remove("in-room", "is-host");
@@ -376,8 +424,10 @@
     els.roomCode.textContent = room.code;
     renderMembers(room.members || []);
     renderQueue(room.queue || []);
+    renderSuggestions(room.suggestions || []);
     renderNowPlaying(room.current);
     updateHostUI();
+    updateKeyUI();
     showCover(!room.current);
     syncFromState(room);
   }
@@ -414,6 +464,28 @@
       ? "👑 Eres el host: elige videos y controla la reproducción"
       : "👀 Solo el host controla la reproducción";
     document.body.classList.toggle("is-host", state.isHost);
+  }
+
+  function updateKeyUI() {
+    const hasKey = Boolean(state.room?.hasKey);
+    const share = Boolean(state.room?.shareKey);
+    els.shareKey.checked = share;
+    if (state.apiKey) els.apiKey.value = state.apiKey;
+
+    if (state.isHost) {
+      els.guestNote.classList.add("hidden");
+    } else {
+      els.guestNote.classList.remove("hidden");
+      els.guestNote.textContent = hasKey
+        ? share
+          ? "El host comparte su API key: puedes buscar con “Explorar YouTube”."
+          : "El host no comparte su API key. Pídesela por el chat."
+        : "El host aún no configuró su API key. Pídesela por el chat.";
+    }
+
+    if (!els.immersive.classList.contains("hidden")) {
+      updateYtGate();
+    }
   }
 
   function showCover(show) {
@@ -850,103 +922,357 @@
     return response;
   }
 
-  async function search() {
-    const query = els.searchInput.value.trim();
-    if (!query) return;
-
-    if (!state.apiKey) {
-      toast("🔑 Guarda tu API key de YouTube para buscar");
-      els.apiKey.focus();
-      return;
+  async function saveKey(key, share) {
+    if (!state.isHost) {
+      toast("Solo el host configura la API key");
+      return false;
     }
+    key = String(key ?? "").trim();
+    state.apiKey = key;
+    state.shareKey = Boolean(share);
 
-    els.searchResults.innerHTML = '<div class="search-loading">Buscando…</div>';
+    if (key) localStorage.setItem("multitube:key", key);
+    else localStorage.removeItem("multitube:key");
+    localStorage.setItem("multitube:share", state.shareKey ? "1" : "0");
+    els.apiKey.value = key;
+    els.shareKey.checked = state.shareKey;
 
-    try {
-      const params = new URLSearchParams({
-        part: "snippet",
-        type: "video",
-        maxResults: "12",
-        videoEmbeddable: "true",
-        q: query,
-        key: state.apiKey,
-      });
+    const response = await emitAck("key:set", { key, share: state.shareKey });
+    if (!response.ok) {
+      toast(response.error || "No se pudo guardar la key");
+      return false;
+    }
+    if (state.room) {
+      state.room.hasKey = Boolean(key);
+      state.room.shareKey = state.shareKey;
+    }
+    updateKeyUI();
+    toast(key ? "🔑 API key guardada y compartida con la sala" : "API key eliminada");
+    return true;
+  }
 
-      const response = await fetch(
-        `https://www.googleapis.com/youtube/v3/search?${params.toString()}`
-      );
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        throw new Error(data?.error?.message || `Error ${response.status}`);
-      }
-
-      const items = (data.items || [])
-        .map((item) => ({
-          videoId: item.id?.videoId,
-          title: decodeHtml(item.snippet?.title || ""),
-          author: decodeHtml(item.snippet?.channelTitle || ""),
-          thumb:
-            item.snippet?.thumbnails?.medium?.url ||
-            item.snippet?.thumbnails?.default?.url ||
-            "",
-        }))
-        .filter((item) => item.videoId);
-
-      renderResults(items);
-    } catch (error) {
-      els.searchResults.innerHTML = "";
-      const box = document.createElement("div");
-      box.className = "search-error";
-      box.textContent = `No se pudo buscar: ${error.message}`;
-      els.searchResults.appendChild(box);
+  function openImmersive() {
+    if (!state.room) return;
+    els.immersive.classList.remove("hidden");
+    document.body.classList.add("immersive-open");
+    els.ytMode.textContent = state.isHost
+      ? "Host · tu key"
+      : "Invitado · key del host";
+    updateYtGate();
+    if (state.room.hasKey && (state.isHost || state.room.shareKey)) {
+      els.ytEmpty.classList.toggle("hidden", Boolean(els.ytGrid.children.length));
+      setTimeout(() => els.ytSearchInput.focus(), 80);
     }
   }
 
-  function renderResults(items) {
-    els.searchResults.innerHTML = "";
+  function closeImmersive() {
+    els.immersive.classList.add("hidden");
+    document.body.classList.remove("immersive-open");
+    els.ytStatus.textContent = "";
+    els.ytStatus.classList.remove("error");
+  }
 
-    if (!items.length) {
-      els.searchResults.innerHTML = '<div class="search-loading">Sin resultados.</div>';
+  function updateYtGate() {
+    const hasKey = Boolean(state.room?.hasKey);
+    const share = Boolean(state.room?.shareKey);
+    if (hasKey && (state.isHost || share)) {
+      els.ytGate.classList.add("hidden");
       return;
     }
+    els.ytGate.classList.remove("hidden");
+    els.ytGateRow.classList.toggle("hidden", !state.isHost);
+    if (!hasKey) {
+      els.ytGateTitle.textContent = state.isHost
+        ? "Agrega tu API key"
+        : "El host no configuró su key";
+      els.ytGateText.textContent = state.isHost
+        ? "Pégala aquí para buscar y compartirla con la sala. Solo se guarda en memoria."
+        : "Pídele al host que agregue su API key para poder buscar juntos.";
+    } else {
+      els.ytGateTitle.textContent = "Búsqueda desactivada";
+      els.ytGateText.textContent = "El host no compartió su API key con los invitados.";
+    }
+    if (state.isHost) els.ytGateInput.value = state.apiKey || "";
+  }
+
+  async function ytSearch(query) {
+    query = String(query || "").trim();
+    state.ytQuery = query;
+    state.ytNextToken = null;
+    state.ytLoadingMore = false;
+
+    if (!query) {
+      els.ytGrid.innerHTML = "";
+      els.ytEmpty.classList.remove("hidden");
+      els.ytStatus.textContent = "";
+      state.ytNextToken = null;
+      return;
+    }
+    if (!state.room) return;
+    if (!state.room.hasKey) {
+      updateYtGate();
+      return;
+    }
+    if (!state.isHost && !state.room.shareKey) {
+      updateYtGate();
+      return;
+    }
+
+    els.ytEmpty.classList.add("hidden");
+    els.ytGate.classList.add("hidden");
+    els.ytStatus.textContent = "Buscando…";
+    els.ytStatus.classList.remove("error");
+    renderYtSkeletons();
+
+    const response = await emitAck("search:query", { q: query }, 25000);
+    if (!response.ok) {
+      els.ytGrid.innerHTML = "";
+      els.ytEmpty.classList.add("hidden");
+      els.ytStatus.textContent = response.error || "No se pudo buscar.";
+      els.ytStatus.classList.add("error");
+      return;
+    }
+
+    els.ytGrid.innerHTML = "";
+    renderYtResults(response.items || [], false);
+    state.ytNextToken = response.nextPageToken || null;
+    if (!(response.items || []).length) {
+      els.ytEmpty.classList.remove("hidden");
+    }
+  }
+
+  async function loadMoreYt() {
+    if (state.ytLoadingMore || !state.ytNextToken || !state.ytQuery) return;
+    if (els.immersive.classList.contains("hidden")) return;
+    state.ytLoadingMore = true;
+
+    const spinner = document.createElement("div");
+    spinner.className = "yt-loading-more";
+    spinner.textContent = "Cargando más videos…";
+    els.ytGrid.appendChild(spinner);
+
+    const token = state.ytNextToken;
+    const response = await emitAck("search:query", {
+      q: state.ytQuery,
+      pageToken: token,
+    }, 25000);
+
+    spinner.remove();
+    state.ytLoadingMore = false;
+
+    if (!response.ok) {
+      els.ytStatus.textContent = response.error || "No se pudo cargar más.";
+      els.ytStatus.classList.add("error");
+      return;
+    }
+
+    if (response.items?.length) {
+      renderYtResults(response.items, true);
+    }
+    state.ytNextToken = response.nextPageToken || null;
+    if (!state.ytNextToken) {
+      els.ytStatus.textContent = `${els.ytGrid.children.length} resultados · fin de la búsqueda`;
+    }
+  }
+
+  function renderYtSkeletons() {
+    els.ytGrid.innerHTML = "";
+    for (let i = 0; i < 8; i += 1) {
+      const card = document.createElement("div");
+      card.className = "yt-card";
+      const thumb = document.createElement("div");
+      thumb.className = "yt-skeleton-thumb";
+      const line1 = document.createElement("div");
+      line1.className = "yt-skeleton-line";
+      const line2 = document.createElement("div");
+      line2.className = "yt-skeleton-line short";
+      card.append(thumb, line1, line2);
+      els.ytGrid.appendChild(card);
+    }
+  }
+
+  function renderYtResults(items, append = false) {
+    if (!append) els.ytGrid.innerHTML = "";
+    if (!items.length && !append) {
+      els.ytStatus.textContent = "No se encontraron videos.";
+      els.ytEmpty.classList.remove("hidden");
+      return;
+    }
+    els.ytEmpty.classList.add("hidden");
+    els.ytStatus.textContent = `${els.ytGrid.children.length + items.length} resultados · ${
+      state.isHost ? "se agregan a la cola" : "se sugieren al host"
+    }${state.ytNextToken ? " · baja para ver más" : ""}`;
 
     items.forEach((video) => {
       const card = document.createElement("button");
       card.type = "button";
-      card.className = "result";
+      card.className = "yt-card";
+
+      const thumb = document.createElement("div");
+      thumb.className = "yt-thumb";
 
       const img = document.createElement("img");
       img.src = video.thumb;
       img.alt = "";
       img.loading = "lazy";
 
-      const info = document.createElement("span");
-      info.className = "r-info";
+      const duration = document.createElement("span");
+      duration.className = "yt-duration";
+      duration.textContent = video.duration || "";
 
-      const title = document.createElement("strong");
+      const add = document.createElement("div");
+      add.className = "yt-add";
+      const addSpan = document.createElement("span");
+      addSpan.textContent = state.isHost ? "＋ Añadir a la cola" : "＋ Sugerir al host";
+      add.appendChild(addSpan);
+
+      thumb.append(img, duration, add);
+
+      const body = document.createElement("div");
+      body.className = "yt-card-body";
+
+      const avatar = document.createElement("div");
+      avatar.className = "yt-avatar";
+      avatar.style.setProperty("--h", String(hueFor(video.author || video.title)));
+      avatar.textContent = initials(video.author || "YT");
+
+      const info = document.createElement("div");
+      info.className = "yt-card-info";
+
+      const title = document.createElement("div");
+      title.className = "yt-card-title";
       title.textContent = video.title;
 
+      const meta = document.createElement("div");
+      meta.className = "yt-card-meta";
+      const line1 = document.createElement("div");
+      line1.textContent = video.author || "YouTube";
+      const line2 = document.createElement("div");
+      line2.textContent = [video.views, video.ago].filter(Boolean).join(" · ");
+      meta.append(line1, line2);
+
+      info.append(title, meta);
+      body.append(avatar, info);
+      card.append(thumb, body);
+
+      card.addEventListener("click", () => pickYtVideo(video));
+      els.ytGrid.appendChild(card);
+    });
+  }
+
+  async function pickYtVideo(video) {
+    if (state.isHost) {
+      const response = await addVideo(video);
+      if (response.ok) closeImmersive();
+    } else {
+      await suggestVideo(video);
+    }
+  }
+
+  async function suggestVideo(video) {
+    const response = await emitAck("suggest:add", { video });
+    if (response.ok) {
+      toast("📨 Sugerencia enviada al host");
+      closeImmersive();
+    } else {
+      toast(response.error || "No se pudo enviar la sugerencia");
+    }
+  }
+
+  function renderSuggestions(list) {
+    els.suggestCount.textContent = list.length;
+    els.suggestEmpty.classList.toggle("hidden", list.length > 0);
+    els.suggestList.innerHTML = "";
+
+    list.forEach((suggestion) => {
+      const li = document.createElement("li");
+      li.className = "suggest-item";
+
+      const img = document.createElement("img");
+      img.src = suggestion.thumb;
+      img.alt = "";
+      img.loading = "lazy";
+
+      const info = document.createElement("div");
+      info.className = "suggest-info";
+
+      const title = document.createElement("strong");
+      title.textContent = suggestion.title;
+
       const author = document.createElement("small");
-      author.textContent = video.author;
+      author.textContent = `${suggestion.author || "YouTube"} · sugerido por ${suggestion.fromName}`;
 
       info.append(title, author);
+      li.append(img, info);
 
-      const add = document.createElement("span");
-      add.className = "r-add";
-      add.textContent = "+";
+      if (state.isHost) {
+        const actions = document.createElement("div");
+        actions.className = "suggest-actions";
 
-      card.append(img, info, add);
+        const accept = document.createElement("button");
+        accept.type = "button";
+        accept.className = "suggest-btn accept";
+        accept.textContent = "✓";
+        accept.title = "Aceptar y agregar a la cola";
+        accept.addEventListener("click", () =>
+          socket.emit("suggest:accept", { id: suggestion.id })
+        );
 
-      card.addEventListener("click", async () => {
-        card.classList.add("adding");
-        const response = await addVideo(video);
-        card.classList.remove("adding");
-        if (response.ok) card.remove();
-      });
+        const reject = document.createElement("button");
+        reject.type = "button";
+        reject.className = "suggest-btn reject";
+        reject.textContent = "✕";
+        reject.title = "Rechazar";
+        reject.addEventListener("click", () =>
+          socket.emit("suggest:reject", { id: suggestion.id })
+        );
 
-      els.searchResults.appendChild(card);
+        actions.append(accept, reject);
+        li.appendChild(actions);
+      } else if (suggestion.fromId === state.youId) {
+        const actions = document.createElement("div");
+        actions.className = "suggest-actions";
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "suggest-btn remove";
+        remove.textContent = "×";
+        remove.title = "Quitar mi sugerencia";
+        remove.addEventListener("click", () =>
+          socket.emit("suggest:remove", { id: suggestion.id })
+        );
+
+        actions.appendChild(remove);
+        li.appendChild(actions);
+      } else {
+        const pending = document.createElement("span");
+        pending.className = "suggest-btn";
+        pending.textContent = "⏳";
+        pending.title = "Pendiente de aprobación";
+        li.appendChild(pending);
+      }
+
+      els.suggestList.appendChild(li);
     });
+  }
+
+  function timeAgo(iso) {
+    const then = new Date(iso).getTime();
+    if (!Number.isFinite(then)) return "";
+    const diff = Math.max(0, Date.now() - then);
+    const units = [
+      [31536000000, "año", "años"],
+      [2592000000, "mes", "meses"],
+      [604800000, "semana", "semanas"],
+      [86400000, "día", "días"],
+      [3600000, "hora", "horas"],
+      [60000, "minuto", "minutos"],
+    ];
+    for (const [ms, one, many] of units) {
+      const value = Math.floor(diff / ms);
+      if (value >= 1) return `hace ${value} ${value === 1 ? one : many}`;
+    }
+    return "hace un momento";
   }
 
   async function addFromUrl() {
@@ -1004,7 +1330,12 @@
     });
 
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") closeModal();
+      if (event.key !== "Escape") return;
+      if (!els.immersive.classList.contains("hidden")) {
+        closeImmersive();
+        return;
+      }
+      closeModal();
     });
 
     els.createSubmit.addEventListener("click", createRoom);
@@ -1086,26 +1417,60 @@
         $$(".tab-btn").forEach((tab) =>
           tab.classList.toggle("active", tab === button)
         );
-        const isQueue = button.dataset.tab === "queue";
-        els.tabQueue.classList.toggle("hidden", !isQueue);
-        els.tabChat.classList.toggle("hidden", isQueue);
+        const tab = button.dataset.tab;
+        els.tabQueue.classList.toggle("hidden", tab !== "queue");
+        els.tabSuggest.classList.toggle("hidden", tab !== "suggest");
+        els.tabChat.classList.toggle("hidden", tab !== "chat");
       });
     });
 
-    els.btnSaveKey.addEventListener("click", () => {
-      const key = els.apiKey.value.trim();
-      state.apiKey = key;
-      if (key) localStorage.setItem("multitube:key", key);
-      else localStorage.removeItem("multitube:key");
-      toast(key ? "🔑 API key guardada en este navegador" : "API key eliminada");
+    els.btnOpenSearch.addEventListener("click", openImmersive);
+    els.ytClose.addEventListener("click", closeImmersive);
+    els.ytClose2.addEventListener("click", closeImmersive);
+    els.ytGateBack.addEventListener("click", closeImmersive);
+
+    els.ytGateSave.addEventListener("click", async () => {
+      const ok = await saveKey(els.ytGateInput.value, true);
+      if (ok) {
+        els.ytGate.classList.add("hidden");
+        const q = els.ytSearchInput.value.trim();
+        if (q) ytSearch(q);
+        else els.ytSearchInput.focus();
+      }
     });
 
-    els.btnSearch.addEventListener("click", search);
-    els.searchInput.addEventListener("keydown", (event) => {
+    els.ytGateInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
-        search();
+        els.ytGateSave.click();
       }
+    });
+
+    els.ytSearchForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      ytSearch(els.ytSearchInput.value);
+    });
+
+    $$(".yt-chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        $$(".yt-chip").forEach((c) => c.classList.toggle("active", c === chip));
+        const q = chip.dataset.q || "";
+        els.ytSearchInput.value = q;
+        if (q) ytSearch(q);
+        else {
+          els.ytGrid.innerHTML = "";
+          els.ytStatus.textContent = "";
+          els.ytEmpty.classList.remove("hidden");
+        }
+      });
+    });
+
+    els.btnSaveKey.addEventListener("click", async () => {
+      await saveKey(els.apiKey.value, els.shareKey.checked);
+    });
+
+    els.shareKey.addEventListener("change", () => {
+      if (state.isHost) saveKey(els.apiKey.value, els.shareKey.checked);
     });
 
     els.btnAddUrl.addEventListener("click", addFromUrl);
@@ -1163,6 +1528,7 @@
     bindSocket();
 
     if (state.apiKey) els.apiKey.value = state.apiKey;
+    els.shareKey.checked = state.shareKey;
 
     const params = new URLSearchParams(location.search);
     const roomParam = (params.get("room") || "")
@@ -1183,6 +1549,16 @@
 
     setInterval(tick, 400);
     setInterval(hostHeartbeat, 5000);
+
+    if (els.ytMain) {
+      els.ytMain.addEventListener("scroll", () => {
+        if (els.immersive.classList.contains("hidden")) return;
+        const el = els.ytMain;
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300) {
+          loadMoreYt();
+        }
+      });
+    }
   }
 
   init();

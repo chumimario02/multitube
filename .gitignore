@@ -5,3 +5,4 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 test-room.js
+test-new.js

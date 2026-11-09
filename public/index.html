@@ -188,27 +188,31 @@
       <aside class="side-panel">
         <div class="tabs">
           <button class="tab-btn active" data-tab="queue" type="button">Cola <span class="tab-count" id="queue-count">0</span></button>
+          <button class="tab-btn" data-tab="suggest" type="button">Ideas <span class="tab-count" id="suggest-count">0</span></button>
           <button class="tab-btn" data-tab="chat" type="button">Chat</button>
         </div>
 
         <!-- COLA -->
         <div class="tab-pane" id="tab-queue">
+          <div class="discover-wrap">
+            <button class="btn btn-primary w-full immersive-btn" id="btn-open-search" type="button">
+              <span class="immersive-play">▶</span> Explorar YouTube
+            </button>
+            <p class="guest-note hidden" id="guest-note">El host aún no comparte su API key. Puedes pedírsela por el chat.</p>
+          </div>
+
           <div class="host-tools hidden" id="host-tools">
             <div class="api-row">
               <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="YouTube API key (solo host)" />
               <button class="mini-btn solid" id="btn-save-key" type="button">Guardar</button>
             </div>
+            <label class="share-toggle">
+              <input type="checkbox" id="share-key" checked />
+              <span>Que los invitados busquen con mi key</span>
+            </label>
             <a class="key-help" id="key-help" href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener noreferrer">
               ¿Cómo obtengo mi API key? ↗
             </a>
-
-            <div class="search-row">
-              <input id="search-input" type="search" autocomplete="off" placeholder="Buscar en YouTube…" />
-              <button class="icon-btn search-btn" id="btn-search" type="button" title="Buscar">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m16 16 4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-              </button>
-            </div>
-            <div class="search-results" id="search-results"></div>
 
             <div class="url-row">
               <input id="url-input" type="url" autocomplete="off" placeholder="…o pega un link de YouTube" />
@@ -222,7 +226,21 @@
           <div class="empty-state" id="queue-empty">
             <span>🎬</span>
             <p>La cola está vacía.</p>
-            <small>El host puede buscar videos o pegar un link.</small>
+            <small>Explora YouTube o pega un link para empezar.</small>
+          </div>
+        </div>
+
+        <!-- SUGERENCIAS -->
+        <div class="tab-pane hidden" id="tab-suggest">
+          <div class="suggest-intro">
+            <strong>Ideas de la sala</strong>
+            <small>Los invitados proponen y el host decide qué se ve.</small>
+          </div>
+          <ul class="suggest-list" id="suggest-list"></ul>
+          <div class="empty-state" id="suggest-empty">
+            <span>💡</span>
+            <p>No hay sugerencias todavía.</p>
+            <small>Abre “Explorar YouTube” y elige un video para proponerlo.</small>
           </div>
         </div>
 
@@ -239,6 +257,79 @@
       </aside>
     </div>
   </main>
+
+  <!-- ===================== BUSCADOR INMERSIVO ===================== -->
+  <div class="immersive hidden" id="immersive">
+    <header class="yt-top">
+      <div class="yt-left">
+        <button class="yt-icon" id="yt-close" type="button" title="Volver a la sala">←</button>
+        <div class="yt-logo">
+          <span class="yt-logo-play">▶</span>
+          <span class="yt-logo-text">MULTI<span>TUBE</span></span>
+        </div>
+      </div>
+
+      <form class="yt-search" id="yt-search-form" autocomplete="off">
+        <input id="yt-search-input" type="search" placeholder="Buscar" aria-label="Buscar en YouTube" />
+        <button class="yt-search-btn" type="submit" aria-label="Buscar">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m16 16 4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </form>
+
+      <div class="yt-right">
+        <span class="yt-badge" id="yt-mode">Sala</span>
+        <button class="yt-close-btn" id="yt-close-2" type="button">Volver a la sala</button>
+      </div>
+    </header>
+
+    <div class="yt-body">
+      <aside class="yt-side">
+        <button class="yt-side-item active" type="button"><span>🏠</span> Inicio</button>
+        <button class="yt-side-item" type="button"><span>🔥</span> Tendencias</button>
+        <button class="yt-side-item" type="button"><span>📺</span> Suscripciones</button>
+        <div class="yt-side-sep"></div>
+        <button class="yt-side-item" type="button"><span>📚</span> Biblioteca</button>
+        <button class="yt-side-item" type="button"><span>🕘</span> Historial</button>
+        <button class="yt-side-item" type="button"><span>👍</span> Me gusta</button>
+        <div class="yt-side-sep"></div>
+        <p class="yt-side-note">Estás en una sala de MULTITUBE. Elige un video y volverás a la sala.</p>
+      </aside>
+
+      <main class="yt-main" id="yt-main">
+        <div class="yt-chips" id="yt-chips">
+          <button class="yt-chip active" data-q="" type="button">Todo</button>
+          <button class="yt-chip" data-q="música" type="button">Música</button>
+          <button class="yt-chip" data-q="videojuegos" type="button">Videojuegos</button>
+          <button class="yt-chip" data-q="en vivo" type="button">En vivo</button>
+          <button class="yt-chip" data-q="noticias" type="button">Noticias</button>
+          <button class="yt-chip" data-q="podcast" type="button">Podcasts</button>
+          <button class="yt-chip" data-q="aprender" type="button">Aprender</button>
+        </div>
+
+        <div class="yt-status" id="yt-status"></div>
+        <div class="yt-grid" id="yt-grid"></div>
+
+        <div class="yt-empty" id="yt-empty">
+          <span class="yt-empty-icon">🔎</span>
+          <h3>Busca algo para la sala</h3>
+          <p>Escribe arriba o toca una categoría. Al elegir un video, vuelves a la sala automáticamente.</p>
+        </div>
+
+        <div class="yt-gate hidden" id="yt-gate">
+          <div class="yt-gate-card">
+            <span class="yt-gate-icon">🔑</span>
+            <h3 id="yt-gate-title">Necesitas una API key</h3>
+            <p id="yt-gate-text">El host todavía no configuró su API key de YouTube.</p>
+            <div class="yt-gate-row" id="yt-gate-row">
+              <input id="yt-gate-input" type="password" placeholder="Pega tu YouTube API key" autocomplete="off" spellcheck="false" />
+              <button class="mini-btn solid" id="yt-gate-save" type="button">Guardar</button>
+            </div>
+            <button class="btn btn-ghost w-full" id="yt-gate-back" type="button">Volver a la sala</button>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
 
   <!-- ============================ MODAL ============================ -->
   <div class="modal-backdrop hidden" id="modal">
