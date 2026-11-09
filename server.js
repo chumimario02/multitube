@@ -393,6 +393,56 @@ async function searchYouTube(apiKey, query, pageToken) {
   return { items, nextPageToken: data.nextPageToken || null };
 }
 
+async function fetchRecommendations(apiKey, region) {
+  const params = new URLSearchParams({
+    part: "snippet,contentDetails,statistics",
+    chart: "mostPopular",
+    maxResults: "25",
+    regionCode: region,
+    key: apiKey,
+  });
+
+  let response;
+  try {
+    response = await fetch(`https://www.googleapis.com/youtube/v3/videos?${params.toString()}`);
+  } catch {
+    throw new Error("No se pudo conectar con YouTube.");
+  }
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const reason = data?.error?.errors?.[0]?.reason || "";
+    if (reason === "quotaExceeded" || reason === "dailyLimitExceeded") {
+      throw new Error("La cuota diaria de la API key se agotó.");
+    }
+    if (reason === "keyInvalid" || reason === "badRequest") {
+      throw new Error("La API key no es válida.");
+    }
+    throw new Error(data?.error?.message || "YouTube rechazó la solicitud.");
+  }
+
+  const items = (data.items || [])
+    .map((video) => ({
+      videoId: video.id,
+      title: decodeEntities(video.snippet?.title || "Video de YouTube"),
+      author: decodeEntities(video.snippet?.channelTitle || ""),
+      thumb:
+        video.snippet?.thumbnails?.medium?.url ||
+        video.snippet?.thumbnails?.default?.url ||
+        `https://i.ytimg.com/vi/${video.id}/mqdefault.jpg`,
+      publishedAt: video.snippet?.publishedAt || "",
+      duration: formatDuration(isoDurationToSeconds(video.contentDetails?.duration)),
+      views: formatViews(video.statistics?.viewCount),
+    }))
+    .filter((video) => video.videoId);
+
+  for (const item of items) {
+    item.ago = timeAgo(item.publishedAt);
+  }
+
+  return items;
+}
+
 /* ------------------------------------------------------------------ */
 /* Socket.IO                                                          */
 /* ------------------------------------------------------------------ */
@@ -635,6 +685,47 @@ io.on("connection", (socket) => {
       respond({ ok: true, items: result.items, nextPageToken: result.nextPageToken });
     } catch (error) {
       respond({ ok: false, error: error.message || "No se pudo buscar en YouTube." });
+    }
+  });
+
+  /* ----------------------------------------------------------------
+     Recomendaciones (videos en tendencia)
+     ---------------------------------------------------------------- */
+  socket.on("recommendations:get", async (payload, ack) => {
+    const [data, respond] = parseArgs(payload, ack);
+    const room = getRoom(socket);
+    if (!room) return respond({ ok: false, error: "No estás en una sala." });
+    if (!room.apiKey) {
+      return respond({ ok: false, error: "El host aún no configuró su API key." });
+    }
+    if (room.hostId !== socket.id && !room.shareKey) {
+      return respond({ ok: false, error: "El host no comparte su API key con los invitados." });
+    }
+
+    const now = Date.now();
+    if (now - (socket.data.lastSearch || 0) < 1200) {
+      return respond({ ok: false, error: "Espera un momento antes de buscar de nuevo." });
+    }
+    socket.data.lastSearch = now;
+
+    const region = String(data.region || "US")
+      .toUpperCase()
+      .slice(0, 2) || "US";
+    const cacheKey = `__rec__${region}`;
+    const cached = room.searchCache.get(cacheKey);
+    if (cached && now - cached.at < 10 * 60 * 1000) {
+      return respond({ ok: true, items: cached.items });
+    }
+
+    try {
+      const items = await fetchRecommendations(room.apiKey, region);
+      room.searchCache.set(cacheKey, { at: now, items, nextPageToken: null });
+      if (room.searchCache.size > 20) {
+        room.searchCache.delete(room.searchCache.keys().next().value);
+      }
+      respond({ ok: true, items });
+    } catch (error) {
+      respond({ ok: false, error: error.message || "No se pudieron cargar recomendaciones." });
     }
   });
 

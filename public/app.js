@@ -960,7 +960,11 @@
       : "Invitado · key del host";
     updateYtGate();
     if (state.room.hasKey && (state.isHost || state.room.shareKey)) {
-      els.ytEmpty.classList.toggle("hidden", Boolean(els.ytGrid.children.length));
+      if (!els.ytGrid.children.length) {
+        ytRecommendations();
+      } else {
+        els.ytEmpty.classList.toggle("hidden", Boolean(els.ytGrid.children.length));
+      }
       setTimeout(() => els.ytSearchInput.focus(), 80);
     }
   }
@@ -1002,10 +1006,7 @@
     state.ytLoadingMore = false;
 
     if (!query) {
-      els.ytGrid.innerHTML = "";
-      els.ytEmpty.classList.remove("hidden");
-      els.ytStatus.textContent = "";
-      state.ytNextToken = null;
+      ytRecommendations();
       return;
     }
     if (!state.room) return;
@@ -1072,6 +1073,49 @@
     state.ytNextToken = response.nextPageToken || null;
     if (!state.ytNextToken) {
       els.ytStatus.textContent = `${els.ytGrid.children.length} resultados · fin de la búsqueda`;
+    }
+  }
+
+  async function ytRecommendations() {
+    if (!state.room) return;
+    if (!state.room.hasKey) {
+      updateYtGate();
+      return;
+    }
+    if (!state.isHost && !state.room.shareKey) {
+      updateYtGate();
+      return;
+    }
+
+    state.ytQuery = "";
+    state.ytNextToken = null;
+    state.ytLoadingMore = false;
+
+    els.ytEmpty.classList.add("hidden");
+    els.ytGate.classList.add("hidden");
+    els.ytStatus.textContent = "Cargando recomendaciones…";
+    els.ytStatus.classList.remove("error");
+    renderYtSkeletons();
+
+    const response = await emitAck("recommendations:get", {}, 25000);
+    if (!response.ok) {
+      els.ytGrid.innerHTML = "";
+      els.ytStatus.textContent = response.error || "No se pudieron cargar recomendaciones.";
+      els.ytStatus.classList.add("error");
+      els.ytEmpty.classList.remove("hidden");
+      return;
+    }
+
+    els.ytGrid.innerHTML = "";
+    renderYtResults(response.items || [], false);
+    state.ytNextToken = null;
+    if (!(response.items || []).length) {
+      els.ytEmpty.classList.remove("hidden");
+      els.ytStatus.textContent = "No hay recomendaciones disponibles.";
+    } else {
+      els.ytStatus.textContent = `${(response.items || []).length} recomendados · ${
+        state.isHost ? "se agregan a la cola" : "se sugieren al host"
+      }`;
     }
   }
 
@@ -1457,11 +1501,7 @@
         const q = chip.dataset.q || "";
         els.ytSearchInput.value = q;
         if (q) ytSearch(q);
-        else {
-          els.ytGrid.innerHTML = "";
-          els.ytStatus.textContent = "";
-          els.ytEmpty.classList.remove("hidden");
-        }
+        else ytRecommendations();
       });
     });
 
