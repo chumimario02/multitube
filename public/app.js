@@ -78,6 +78,7 @@
     ytStatus: $("#yt-status"),
     ytGrid: $("#yt-grid"),
     ytLoadMore: $("#yt-load-more"),
+    ytRetry: $("#yt-retry"),
     ytEmpty: $("#yt-empty"),
     ytGate: $("#yt-gate"),
     ytGateTitle: $("#yt-gate-title"),
@@ -977,6 +978,7 @@
     els.ytStatus.textContent = "";
     els.ytStatus.classList.remove("error");
     els.ytLoadMore.classList.add("hidden");
+    els.ytRetry.classList.add("hidden");
   }
 
   function updateYtGate() {
@@ -1036,18 +1038,23 @@
       els.ytStatus.textContent = response.error || "No se pudo buscar.";
       els.ytStatus.classList.add("error");
       els.ytLoadMore.classList.add("hidden");
+      els.ytRetry.classList.remove("hidden");
       return;
     }
 
+    els.ytStatus.classList.remove("error");
+    els.ytRetry.classList.add("hidden");
     els.ytGrid.innerHTML = "";
     renderYtResults(response.items || [], false);
     state.ytNextToken = response.nextPageToken || null;
     if (!(response.items || []).length) {
       els.ytEmpty.classList.remove("hidden");
       els.ytLoadMore.classList.add("hidden");
+      els.ytLoadMore.textContent = "Cargar más resultados";
     } else {
       els.ytLoadMore.classList.toggle("hidden", !state.ytNextToken);
-      els.ytLoadMore.textContent = "Cargar más resultados";
+      els.ytLoadMore.textContent = state.ytNextToken ? "Cargar más resultados" : "No hay más resultados";
+      els.ytLoadMore.disabled = !state.ytNextToken;
     }
   }
 
@@ -1124,9 +1131,12 @@
       els.ytStatus.classList.add("error");
       els.ytEmpty.classList.remove("hidden");
       els.ytLoadMore.classList.add("hidden");
+      els.ytRetry.classList.remove("hidden");
       return;
     }
 
+    els.ytStatus.classList.remove("error");
+    els.ytRetry.classList.add("hidden");
     els.ytGrid.innerHTML = "";
     renderYtResults(response.items || [], false);
     state.ytNextToken = response.nextPageToken || null;
@@ -1139,7 +1149,8 @@
         state.isHost ? "se agregan a la cola" : "se sugieren al host"
       }`;
       els.ytLoadMore.classList.toggle("hidden", !state.ytNextToken);
-      els.ytLoadMore.textContent = "Cargar más resultados";
+      els.ytLoadMore.textContent = state.ytNextToken ? "Cargar más resultados" : "No hay más resultados";
+      els.ytLoadMore.disabled = !state.ytNextToken;
     }
   }
 
@@ -1616,6 +1627,13 @@
 
     if (els.ytLoadMore) {
       els.ytLoadMore.addEventListener("click", loadMoreYt);
+    }
+    if (els.ytRetry) {
+      els.ytRetry.addEventListener("click", () => {
+        els.ytRetry.classList.add("hidden");
+        if (state.ytQuery) ytSearch(state.ytQuery);
+        else ytRecommendations();
+      });
     }
   }
 
