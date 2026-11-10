@@ -413,6 +413,10 @@ async function fetchRecommendations(apiKey, region, pageToken) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const reason = data?.error?.errors?.[0]?.reason || "";
+    // Si el código de región no es soportado, reintenta con US.
+    if (region !== "US" && (reason === "badRequest" || reason === "invalidParameter")) {
+      return fetchRecommendations(apiKey, "US", pageToken);
+    }
     if (reason === "quotaExceeded" || reason === "dailyLimitExceeded") {
       throw new Error("La cuota diaria de la API key se agotó.");
     }
@@ -709,9 +713,12 @@ io.on("connection", (socket) => {
     }
     socket.data.lastSearch = now;
 
-    const region = String(data.region || "US")
+    const rawRegion = String(data.region || "US")
       .toUpperCase()
-      .slice(0, 2) || "US";
+      .slice(0, 2);
+    // Solo códigos ISO de 2 letras. En móviles el locale puede ser 'es-419'
+    // (slice -> '19'), que YouTube rechaza. En ese caso usamos 'US'.
+    const region = /^[A-Z]{2}$/.test(rawRegion) ? rawRegion : "US";
     const pageToken = String(data.pageToken || "").trim() || null;
 
     const cacheKey = `__rec__${region}`;

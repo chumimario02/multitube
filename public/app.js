@@ -1115,7 +1115,8 @@
     state.ytQuery = "";
     state.ytNextToken = null;
     state.ytLoadingMore = false;
-    state.ytRegion = state.ytRegion || (navigator.language || "en-US").slice(-2).toUpperCase() || "US";
+    const rawRegion = (navigator.language || "en-US").slice(-2).toUpperCase();
+    state.ytRegion = state.ytRegion || (/^[A-Z]{2}$/.test(rawRegion) ? rawRegion : "US");
 
     els.ytEmpty.classList.add("hidden");
     els.ytGate.classList.add("hidden");
