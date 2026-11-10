@@ -1566,11 +1566,13 @@
     updateVoiceUI();
   }
 
-  async function askVoiceAndCamera() {
-    if (state.voiceAsked) {
+  async function askVoiceAndCamera(force = false) {
+    if (state.voiceAsked && !force) {
       // Ya preguntamos antes en esta sesión; si aceptó, reactivar automáticamente
       if (localStorage.getItem("multitube:voicePref") === "yes") {
         await startVoice(true);
+      } else {
+        toast("Activaste 'No' antes. Vuelve a intentarlo o borra la preferencia.");
       }
       return;
     }
@@ -1853,7 +1855,7 @@
     });
 
     els.voiceEnable.addEventListener("click", async () => {
-      await askVoiceAndCamera();
+      await askVoiceAndCamera(true);
     });
     els.voiceMic.addEventListener("click", toggleMic);
     els.voiceCam.addEventListener("click", toggleCam);
