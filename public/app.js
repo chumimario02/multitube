@@ -81,6 +81,7 @@
     voiceLocal: $("#voice-local"),
     voiceRemotes: $("#voice-remotes"),
     voiceCount: $("#voice-count"),
+    voiceFloaters: $("#voice-floaters"),
     chatMessages: $("#chat-messages"),
     chatForm: $("#chat-form"),
     chatInput: $("#chat-input"),
@@ -133,6 +134,8 @@
     localAudioStream: null,
     localVideoStream: null,
     voicePeers: new Map(),
+    voiceFloaters: new Map(),
+    floaterIndex: 0,
     ytNextToken: null,
     ytLoadingMore: false,
     ytQuery: "",
@@ -325,8 +328,9 @@
     // Chat de voz / video (señalización WebRTC)
     socket.on("voice:peer-joined", ({ fromId, name } = {}) => {
       if (!fromId || fromId === state.youId) return;
-      // El nuevo compañero iniciará la conexión (él tiene la lista de peers).
-      // Aquí solo avisamos; la conexión se crea al recibir su offer.
+      if (!state.voicePeerNames) state.voicePeerNames = new Map();
+      state.voicePeerNames.set(fromId, name || "Participante");
+      createFloater(fromId, name || "Participante", null);
       updateVoiceCount();
       toast(`🎤 ${name || "Alguien"} se unió al chat de voz`);
     });
@@ -1491,6 +1495,16 @@
 
     const pc = new RTCPeerConnection(RTC_CONFIG);
 
+    const peer = {
+      pc,
+      audio: remoteAudio,
+      video: remoteVideo,
+      container,
+      stream: new MediaStream(),
+      name: (state.voicePeerNames && state.voicePeerNames.get(peerId)) || "Participante",
+    };
+    state.voicePeers.set(peerId, peer);
+
     if (state.localAudioStream) {
       state.localAudioStream.getAudioTracks().forEach((track) => {
         pc.addTrack(track, state.localAudioStream);
@@ -1521,12 +1535,19 @@
     els.voiceRemotes.appendChild(container);
 
     pc.ontrack = (event) => {
-      const stream = event.streams[0] || new MediaStream([event.track]);
-      if (event.track.kind === "audio") {
-        remoteAudio.srcObject = stream;
+      const track = event.track;
+      peer.stream.addTrack(track);
+      if (track.kind === "audio") {
+        remoteAudio.srcObject = peer.stream;
         remoteAudio.play().catch(() => {});
-      } else if (event.track.kind === "video") {
-        remoteVideo.srcObject = stream;
+      } else if (track.kind === "video") {
+        remoteVideo.srcObject = peer.stream;
+      }
+      const floater = state.voiceFloaters.get(peerId);
+      if (floater) {
+        updateFloaterMedia(floater, peer.stream);
+      } else {
+        createFloater(peerId, peer.name, peer.stream);
       }
     };
 
@@ -1541,8 +1562,6 @@
         removeVoicePeer(peerId);
       }
     };
-
-    state.voicePeers.set(peerId, { pc, audio: remoteAudio, video: remoteVideo, container });
 
     if (isInitiator) {
       (async () => {
@@ -1561,14 +1580,16 @@
 
   function removeVoicePeer(peerId) {
     const peer = state.voicePeers.get(peerId);
-    if (!peer) return;
-    try {
-      peer.pc.close();
-    } catch {}
-    peer.audio?.remove();
-    peer.video?.remove();
-    peer.container?.remove();
-    state.voicePeers.delete(peerId);
+    if (peer) {
+      try {
+        peer.pc.close();
+      } catch {}
+      peer.audio?.remove();
+      peer.video?.remove();
+      peer.container?.remove();
+      state.voicePeers.delete(peerId);
+    }
+    removeFloater(peerId);
     updateVoiceCount();
     updateVoiceUI();
   }
@@ -1699,10 +1720,25 @@
         return;
       }
       const peers = response.peers || [];
-      peers.forEach((peerId) => createPeerConnection(peerId, true));
+      peers.forEach((peer) => {
+        const peerId = typeof peer === "string" ? peer : peer.id;
+        const name = typeof peer === "string" ? "Participante" : peer.name;
+        if (!state.voicePeerNames) state.voicePeerNames = new Map();
+        state.voicePeerNames.set(peerId, name);
+        createFloater(peerId, name, null);
+        createPeerConnection(peerId, true);
+      });
       updateVoiceUI();
       updateVoiceCount();
     });
+
+    // Vista propia si hay cámara
+    if (state.localVideoStream) {
+      const selfStream = new MediaStream();
+      if (state.localAudioStream) state.localAudioStream.getAudioTracks().forEach((t) => selfStream.addTrack(t));
+      state.localVideoStream.getVideoTracks().forEach((t) => selfStream.addTrack(t));
+      createFloater("self", "Tú", selfStream);
+    }
 
     updateVoiceUI();
   }
@@ -1728,6 +1764,10 @@
             state.localVideoStream.getVideoTracks().forEach((t) => combined.addTrack(t));
             state.voiceLocal.srcObject = combined;
           }
+          const selfStream = new MediaStream();
+          if (state.localAudioStream) state.localAudioStream.getAudioTracks().forEach((t) => selfStream.addTrack(t));
+          state.localVideoStream.getVideoTracks().forEach((t) => selfStream.addTrack(t));
+          createFloater("self", "Tú", selfStream);
           // agregar track a peers existentes
           for (const [peerId, peer] of state.voicePeers) {
             stream.getVideoTracks().forEach((track) => peer.pc.addTrack(track, stream));
@@ -1774,6 +1814,9 @@
     });
     state.voicePeers.clear();
     if (state.voiceLocal) state.voiceLocal.srcObject = null;
+    // remove all floaters
+    for (const id of state.voiceFloaters.keys()) removeFloater(id);
+    state.floaterIndex = 0;
     updateVoiceUI();
     updateVoiceCount();
     toast("📞 Colgaste el chat de voz");

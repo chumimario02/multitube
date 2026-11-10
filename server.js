@@ -871,10 +871,11 @@ io.on("connection", (socket) => {
     if (!room) return ack?.({ ok: false, error: "No estás en una sala." });
 
     socket.data.inVoice = true;
-    const peers = [...room.members.keys()].filter(
-      (id) => id !== socket.id && room.voicePeers?.has(id)
-    );
     if (!room.voicePeers) room.voicePeers = new Set();
+    const peers = [...room.voicePeers].filter((id) => id !== socket.id).map((id) => ({
+      id,
+      name: room.members.get(id)?.name || "Participante",
+    }));
     room.voicePeers.add(socket.id);
 
     // Avisar a los demás

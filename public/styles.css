@@ -2715,6 +2715,121 @@ body.immersive-open {
   flex: 1;
 }
 
+/* ============================================================
+   Ventanas flotantes de video (chat de voz)
+   ============================================================ */
+
+.voice-floaters {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  pointer-events: none;
+}
+
+.voice-floater {
+  position: absolute;
+  width: 230px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #0a0913;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 18px 48px -12px rgba(0, 0, 0, 0.85);
+  pointer-events: auto;
+  user-select: none;
+  animation: floaterIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1.2) both;
+}
+
+@keyframes floaterIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(8px);
+  }
+}
+
+.voice-floater-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03));
+  cursor: grab;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.voice-floater-bar:active {
+  cursor: grabbing;
+}
+
+.voice-floater-name {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #f1f1f1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.voice-floater-close {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  flex: none;
+}
+
+.voice-floater-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.voice-floater-video {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: #000;
+  object-fit: cover;
+  display: block;
+}
+
+.voice-floater-audio {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  aspect-ratio: 4 / 3;
+  background: radial-gradient(circle at 50% 40%, rgba(139, 92, 246, 0.25), #0a0913);
+}
+
+.voice-floater-avatar {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: hsl(var(--h, 270) 60% 50%);
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.voice-floater-audio small {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+@media (max-width: 720px) {
+  .voice-floater {
+    width: 160px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
