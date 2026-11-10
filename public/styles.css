@@ -2654,6 +2654,67 @@ body.immersive-open {
   font-weight: 600;
 }
 
+/* ============================================================
+   Permiso de voz/cámara
+   ============================================================ */
+
+.voice-perm {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(4, 4, 9, 0.72);
+  backdrop-filter: blur(10px);
+  animation: fadeIn 0.25s both;
+}
+
+.voice-perm-card {
+  width: min(100%, 360px);
+  padding: 28px 24px 22px;
+  border-radius: 22px;
+  border: 1px solid var(--border-strong);
+  background: linear-gradient(170deg, #14121f, #0b0a13);
+  text-align: center;
+  box-shadow: 0 40px 100px -20px rgba(0, 0, 0, 0.9);
+  animation: modalIn 0.35s cubic-bezier(0.2, 0.8, 0.2, 1.1) both;
+}
+
+.voice-perm-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  font-size: 1.6rem;
+}
+
+.voice-perm-card h3 {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+}
+
+.voice-perm-card p {
+  margin: 0 0 20px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.voice-perm-btns {
+  display: flex;
+  gap: 10px;
+}
+
+.voice-perm-btns .btn {
+  flex: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=5" />
+  <link rel="stylesheet" href="styles.css?v=8" />
 </head>
 <body>
   <!-- Fondo animado -->
@@ -354,6 +354,19 @@
     </div>
   </div>
 
+  <!-- ===================== PERMISO DE VOZ/CAMARA ===================== -->
+  <div class="voice-perm hidden" id="voice-perm">
+    <div class="voice-perm-card">
+      <span class="voice-perm-icon" id="voice-perm-icon">🎤</span>
+      <h3 id="voice-perm-title">¿Quieres usar chat de voz?</h3>
+      <p id="voice-perm-text">Se te pedirá permiso para el micrófono.</p>
+      <div class="voice-perm-btns">
+        <button class="btn btn-ghost" id="voice-perm-no" type="button">No</button>
+        <button class="btn btn-primary" id="voice-perm-yes" type="button">Sí</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ============================ MODAL ============================ -->
   <div class="modal-backdrop hidden" id="modal">
     <div class="modal" role="dialog" aria-modal="true">
@@ -385,6 +398,6 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://www.youtube.com/iframe_api"></script>
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

@@ -66,7 +66,14 @@
     suggestCount: $("#suggest-count"),
     suggestEmpty: $("#suggest-empty"),
     voiceStatus: $("#voice-status"),
+    voiceControls: $("#voice-controls"),
     voiceEnable: $("#voice-enable"),
+    voicePerm: $("#voice-perm"),
+    voicePermIcon: $("#voice-perm-icon"),
+    voicePermTitle: $("#voice-perm-title"),
+    voicePermText: $("#voice-perm-text"),
+    voicePermYes: $("#voice-perm-yes"),
+    voicePermNo: $("#voice-perm-no"),
     voiceActive: $("#voice-active"),
     voiceMic: $("#voice-mic"),
     voiceCam: $("#voice-cam"),
@@ -1463,8 +1470,8 @@
 
   function updateVoiceUI() {
     const active = state.voiceActive || !!state.localAudioStream || !!state.localVideoStream;
-    els.voiceControls.classList.toggle("hidden", active);
-    els.voiceActive.classList.toggle("hidden", !active);
+    if (els.voiceControls) els.voiceControls.classList.toggle("hidden", active);
+    if (els.voiceActive) els.voiceActive.classList.toggle("hidden", !active);
     els.voiceStatus.textContent = active
       ? `Conectado · ${state.voicePeers.size} en voz`
       : "Chat de voz desactivado";
@@ -1566,59 +1573,106 @@
     updateVoiceUI();
   }
 
+  function askPermissionModal(icon, title, text, constraints) {
+    return new Promise((resolve) => {
+      els.voicePermIcon.textContent = icon;
+      els.voicePermTitle.textContent = title;
+      els.voicePermText.textContent = text;
+      els.voicePerm.classList.remove("hidden");
+      document.body.classList.add("modal-open");
+
+      const cleanup = () => {
+        els.voicePerm.classList.add("hidden");
+        document.body.classList.remove("modal-open");
+        els.voicePermYes.onclick = null;
+        els.voicePermNo.onclick = null;
+      };
+
+      els.voicePermYes.onclick = async () => {
+        if (constraints) {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            cleanup();
+            resolve(stream);
+            return;
+          } catch (error) {
+            cleanup();
+            toast(`${title.includes("voz") ? "Micrófono" : "Cámara"}: ${error.name || "error"} - ${error.message || "sin permiso"}`);
+            resolve(null);
+            return;
+          }
+        }
+        cleanup();
+        resolve(true);
+      };
+      els.voicePermNo.onclick = () => {
+        cleanup();
+        resolve(null);
+      };
+    });
+  }
+
   async function askVoiceAndCamera(force = false) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast("Tu navegador no soporta cámara/micrófono. Usa HTTPS o localhost.");
+      return;
+    }
     if (state.voiceAsked && !force) {
       // Ya preguntamos antes en esta sesión; si aceptó, reactivar automáticamente
       if (localStorage.getItem("multitube:voicePref") === "yes") {
         await startVoice(true);
       } else {
-        toast("Activaste 'No' antes. Vuelve a intentarlo o borra la preferencia.");
+        toast("Activaste 'No' antes. Usa el botón para reactivar.");
       }
       return;
     }
     state.voiceAsked = true;
     sessionStorage.setItem("multitube:voiceAsked", "1");
 
-    const wantVoice = window.confirm("¿Quieres usar chat de voz en esta sala?");
+    const audioStream = await askPermissionModal(
+      "🎤",
+      "¿Quieres usar chat de voz?",
+      "Se te pedirá permiso para el micrófono.",
+      { audio: true }
+    );
+    const wantVoice = !!audioStream;
     localStorage.setItem("multitube:voicePref", wantVoice ? "yes" : "no");
 
     if (wantVoice) {
-      try {
-        state.localAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        state.voiceActive = true;
-      } catch (error) {
-        toast("No se pudo acceder al micrófono");
-        state.voiceActive = false;
-      }
+      state.localAudioStream = audioStream;
+      state.voiceActive = true;
+    } else {
+      state.voiceActive = false;
     }
 
-    const wantCam = window.confirm("¿Quieres usar la cámara?");
-    if (wantCam) {
-      try {
-        state.localVideoStream = await navigator.mediaDevices.getUserMedia({ video: true });
-        if (state.voiceLocal) {
-          const combined = new MediaStream();
-          if (state.localAudioStream) state.localAudioStream.getAudioTracks().forEach((t) => combined.addTrack(t));
-          state.localVideoStream.getVideoTracks().forEach((t) => combined.addTrack(t));
-          state.voiceLocal.srcObject = combined;
-        }
-        // Renegociar con los peers existentes
-        for (const [peerId, peer] of state.voicePeers) {
-          state.localVideoStream.getVideoTracks().forEach((track) => {
-            peer.pc.addTrack(track, state.localVideoStream);
-          });
-          try {
-            const offer = await peer.pc.createOffer();
-            await peer.pc.setLocalDescription(offer);
-            socket.emit("voice:offer", { to: peerId, sdp: peer.pc.localDescription });
-          } catch (e) {
-            console.error("renegotiate error", e);
-          }
-        }
-        updateVoiceUI();
-      } catch (error) {
-        toast("No se pudo acceder a la cámara");
+    const videoStream = await askPermissionModal(
+      "📹",
+      "¿Quieres usar la cámara?",
+      "Se te pedirá permiso para la cámara.",
+      { video: true }
+    );
+    if (videoStream) {
+      state.localVideoStream = videoStream;
+      if (state.voiceLocal) {
+        const combined = new MediaStream();
+        if (state.localAudioStream) state.localAudioStream.getAudioTracks().forEach((t) => combined.addTrack(t));
+        state.localVideoStream.getVideoTracks().forEach((t) => combined.addTrack(t));
+        state.voiceLocal.srcObject = combined;
       }
+      // Renegociar con los peers existentes
+      for (const [peerId, peer] of state.voicePeers) {
+        state.localVideoStream.getVideoTracks().forEach((track) => {
+          peer.pc.addTrack(track, state.localVideoStream);
+        });
+        try {
+          const offer = await peer.pc.createOffer();
+          await peer.pc.setLocalDescription(offer);
+          socket.emit("voice:offer", { to: peerId, sdp: peer.pc.localDescription });
+        } catch (e) {
+          console.error("renegotiate error", e);
+        }
+      }
+      updateVoiceUI();
     }
 
     if (state.voiceActive || state.localVideoStream) {
