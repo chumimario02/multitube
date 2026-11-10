@@ -311,7 +311,7 @@ async function searchYouTube(apiKey, query, pageToken) {
   const params = new URLSearchParams({
     part: "snippet",
     type: "video",
-    maxResults: "12",
+    maxResults: "50",
     videoEmbeddable: "true",
     q: query,
     key: apiKey,
@@ -397,7 +397,7 @@ async function fetchRecommendations(apiKey, region, pageToken) {
   const params = new URLSearchParams({
     part: "snippet,contentDetails,statistics",
     chart: "mostPopular",
-    maxResults: "12",
+    maxResults: "50",
     regionCode: region,
     key: apiKey,
   });
