@@ -189,6 +189,7 @@
         <div class="tabs">
           <button class="tab-btn active" data-tab="queue" type="button">Cola <span class="tab-count" id="queue-count">0</span></button>
           <button class="tab-btn" data-tab="suggest" type="button">Ideas <span class="tab-count" id="suggest-count">0</span></button>
+          <button class="tab-btn" data-tab="voice" type="button">Voz <span class="tab-count" id="voice-count">0</span></button>
           <button class="tab-btn" data-tab="chat" type="button">Chat</button>
         </div>
 
@@ -241,6 +242,26 @@
             <span>💡</span>
             <p>No hay sugerencias todavía.</p>
             <small>Abre “Explorar YouTube” y elige un video para proponerlo.</small>
+          </div>
+        </div>
+
+        <!-- VOZ -->
+        <div class="tab-pane hidden" id="tab-voice">
+          <div class="voice-panel">
+            <div class="voice-status" id="voice-status">Chat de voz desactivado</div>
+            <div class="voice-controls" id="voice-controls">
+              <button class="btn btn-primary w-full" id="voice-enable" type="button">🎤 Activar voz y cámara</button>
+              <p class="voice-hint">Opcional. Se te pedirá permiso para el micrófono y la cámara.</p>
+            </div>
+            <div class="voice-active hidden" id="voice-active">
+              <div class="voice-btns">
+                <button class="voice-btn toggle" id="voice-mic" type="button">🎤 Mic on</button>
+                <button class="voice-btn toggle" id="voice-cam" type="button">📹 Cámara off</button>
+                <button class="voice-btn danger" id="voice-hangup" type="button">📞 Colgar</button>
+              </div>
+              <video class="voice-local" id="voice-local" autoplay muted playsinline></video>
+              <div class="voice-remotes" id="voice-remotes"></div>
+            </div>
           </div>
         </div>
 

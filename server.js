@@ -160,6 +160,7 @@ function createRoom(socket, name) {
     apiKey: null,
     shareKey: true,
     searchCache: new Map(),
+    voicePeers: new Set(),
   };
   rooms.set(room.code, room);
   joinSocketToRoom(socket, room);
@@ -205,6 +206,12 @@ function leaveRoom(socket, announce = true) {
 
   const member = room.members.get(socket.id);
   const name = member ? member.name : "Alguien";
+
+  if (room.voicePeers?.has(socket.id)) {
+    room.voicePeers.delete(socket.id);
+    socket.to(roomKey(room.code)).emit("voice:peer-left", { fromId: socket.id });
+  }
+
   room.members.delete(socket.id);
   socket.leave(roomKey(room.code));
   socket.data.roomCode = null;
@@ -856,7 +863,78 @@ io.on("connection", (socket) => {
     broadcastState(room);
   });
 
-  socket.on("disconnect", () => leaveRoom(socket, true));
+  /* ----------------------------------------------------------------
+     Chat de voz / video (señalización WebRTC, el media no pasa por aquí)
+     ---------------------------------------------------------------- */
+  socket.on("voice:join", (payload, ack) => {
+    const room = getRoom(socket);
+    if (!room) return ack?.({ ok: false, error: "No estás en una sala." });
+
+    socket.data.inVoice = true;
+    const peers = [...room.members.keys()].filter(
+      (id) => id !== socket.id && room.voicePeers?.has(id)
+    );
+    if (!room.voicePeers) room.voicePeers = new Set();
+    room.voicePeers.add(socket.id);
+
+    // Avisar a los demás
+    socket.to(roomKey(room.code)).emit("voice:peer-joined", {
+      fromId: socket.id,
+      name: room.members.get(socket.id)?.name || "Anónimo",
+    });
+
+    ack?.({ ok: true, peers });
+  });
+
+  socket.on("voice:leave", () => {
+    const room = getRoom(socket);
+    if (!room) return;
+    room.voicePeers?.delete(socket.id);
+    socket.data.inVoice = false;
+    socket.to(roomKey(room.code)).emit("voice:peer-left", { fromId: socket.id });
+  });
+
+  socket.on("voice:offer", (payload) => {
+    const room = getRoom(socket);
+    if (!room) return;
+    const target = String(payload?.to || "");
+    if (!room.members.has(target)) return;
+    io.to(target).emit("voice:offer", {
+      from: socket.id,
+      sdp: payload?.sdp,
+    });
+  });
+
+  socket.on("voice:answer", (payload) => {
+    const room = getRoom(socket);
+    if (!room) return;
+    const target = String(payload?.to || "");
+    if (!room.members.has(target)) return;
+    io.to(target).emit("voice:answer", {
+      from: socket.id,
+      sdp: payload?.sdp,
+    });
+  });
+
+  socket.on("voice:ice", (payload) => {
+    const room = getRoom(socket);
+    if (!room) return;
+    const target = String(payload?.to || "");
+    if (!room.members.has(target)) return;
+    io.to(target).emit("voice:ice", {
+      from: socket.id,
+      candidate: payload?.candidate,
+    });
+  });
+
+  socket.on("disconnect", () => {
+    const room = getRoom(socket);
+    if (room?.voicePeers?.has(socket.id)) {
+      room.voicePeers.delete(socket.id);
+      socket.to(roomKey(room.code)).emit("voice:peer-left", { fromId: socket.id });
+    }
+    leaveRoom(socket, true);
+  });
 });
 
 /* ------------------------------------------------------------------ */

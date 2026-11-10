@@ -60,10 +60,20 @@
     queueEmpty: $("#queue-empty"),
     tabQueue: $("#tab-queue"),
     tabSuggest: $("#tab-suggest"),
+    tabVoice: $("#tab-voice"),
     tabChat: $("#tab-chat"),
     suggestList: $("#suggest-list"),
     suggestCount: $("#suggest-count"),
     suggestEmpty: $("#suggest-empty"),
+    voiceStatus: $("#voice-status"),
+    voiceEnable: $("#voice-enable"),
+    voiceActive: $("#voice-active"),
+    voiceMic: $("#voice-mic"),
+    voiceCam: $("#voice-cam"),
+    voiceHangup: $("#voice-hangup"),
+    voiceLocal: $("#voice-local"),
+    voiceRemotes: $("#voice-remotes"),
+    voiceCount: $("#voice-count"),
     chatMessages: $("#chat-messages"),
     chatForm: $("#chat-form"),
     chatInput: $("#chat-input"),
@@ -111,6 +121,11 @@
     seeking: false,
     apiKey: localStorage.getItem("multitube:key") || "",
     shareKey: localStorage.getItem("multitube:share") !== "0",
+    voiceAsked: sessionStorage.getItem("multitube:voiceAsked") === "1",
+    voiceActive: false,
+    localAudioStream: null,
+    localVideoStream: null,
+    voicePeers: new Map(),
     ytNextToken: null,
     ytLoadingMore: false,
     ytQuery: "",
@@ -300,6 +315,57 @@
       }
     });
 
+    // Chat de voz / video (señalización WebRTC)
+    socket.on("voice:peer-joined", ({ fromId, name } = {}) => {
+      if (!fromId || fromId === state.youId) return;
+      // El nuevo compañero iniciará la conexión (él tiene la lista de peers).
+      // Aquí solo avisamos; la conexión se crea al recibir su offer.
+      updateVoiceCount();
+      toast(`🎤 ${name || "Alguien"} se unió al chat de voz`);
+    });
+
+    socket.on("voice:peer-left", ({ fromId } = {}) => {
+      if (!fromId) return;
+      removeVoicePeer(fromId);
+      updateVoiceCount();
+    });
+
+    socket.on("voice:offer", async ({ from, sdp } = {}) => {
+      if (!from || !sdp) return;
+      if (!state.voiceActive && !state.localAudioStream && !state.localVideoStream) return;
+      const pc = createPeerConnection(from, false);
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit("voice:answer", { to: from, sdp: pc.localDescription });
+      } catch (error) {
+        console.error("voice offer error", error);
+      }
+    });
+
+    socket.on("voice:answer", async ({ from, sdp } = {}) => {
+      if (!from || !sdp) return;
+      const peer = state.voicePeers.get(from);
+      if (!peer) return;
+      try {
+        await peer.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      } catch (error) {
+        console.error("voice answer error", error);
+      }
+    });
+
+    socket.on("voice:ice", async ({ from, candidate } = {}) => {
+      if (!from || !candidate) return;
+      const peer = state.voicePeers.get(from);
+      if (!peer) return;
+      try {
+        await peer.pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (error) {
+        // ICE candidates can arrive before remote desc; ignore
+      }
+    });
+
     socket.on("room:closed", ({ reason } = {}) => {
       toast(reason || "La sala se cerró");
       clearSession();
@@ -359,6 +425,10 @@
     updateSoundPill();
     updateKeyUI();
 
+    if (!state.voiceAsked || localStorage.getItem("multitube:voicePref") === "yes") {
+      setTimeout(() => askVoiceAndCamera(), 700);
+    }
+
     if (!silent) {
       toast(
         state.isHost
@@ -378,6 +448,7 @@
 
   function leaveRoom() {
     if (!window.confirm("¿Seguro que quieres salir de la sala?")) return;
+    hangupVoice();
     socket.emit("room:leave");
     clearSession();
     goHome();
@@ -407,6 +478,7 @@
     els.playerGate.classList.add("hidden");
     els.soundPill.classList.add("hidden");
     closeImmersive();
+    hangupVoice();
     els.viewRoom.classList.add("hidden");
     els.viewHome.classList.remove("hidden");
     document.body.classList.remove("in-room", "is-host");
@@ -1377,6 +1449,281 @@
   }
 
   /* ------------------------------------------------------------
+     Chat de voz y video (WebRTC)
+     ------------------------------------------------------------ */
+
+  const RTC_CONFIG = {
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  };
+
+  function updateVoiceCount() {
+    const count = state.voicePeers.size + (state.voiceActive ? 1 : 0);
+    els.voiceCount.textContent = state.voicePeers.size;
+  }
+
+  function updateVoiceUI() {
+    const active = state.voiceActive || !!state.localAudioStream || !!state.localVideoStream;
+    els.voiceControls.classList.toggle("hidden", active);
+    els.voiceActive.classList.toggle("hidden", !active);
+    els.voiceStatus.textContent = active
+      ? `Conectado · ${state.voicePeers.size} en voz`
+      : "Chat de voz desactivado";
+
+    els.voiceMic.textContent = state.localAudioStream?.getAudioTracks()[0]?.enabled
+      ? "🎤 Mic on"
+      : "🔇 Mic off";
+    els.voiceCam.textContent = state.localVideoStream?.getVideoTracks()[0]?.enabled
+      ? "📹 Cámara on"
+      : "🚫 Cámara off";
+  }
+
+  function createPeerConnection(peerId, isInitiator) {
+    if (state.voicePeers.has(peerId)) {
+      return state.voicePeers.get(peerId).pc;
+    }
+
+    const pc = new RTCPeerConnection(RTC_CONFIG);
+
+    if (state.localAudioStream) {
+      state.localAudioStream.getAudioTracks().forEach((track) => {
+        pc.addTrack(track, state.localAudioStream);
+      });
+    }
+    if (state.localVideoStream) {
+      state.localVideoStream.getVideoTracks().forEach((track) => {
+        pc.addTrack(track, state.localVideoStream);
+      });
+    }
+
+    const remoteAudio = document.createElement("audio");
+    remoteAudio.autoplay = true;
+    remoteAudio.playsInline = true;
+
+    const remoteVideo = document.createElement("video");
+    remoteVideo.autoplay = true;
+    remoteVideo.playsInline = true;
+    remoteVideo.muted = false;
+
+    const container = document.createElement("div");
+    container.className = "voice-remote";
+    container.dataset.peer = peerId;
+    const label = document.createElement("span");
+    label.className = "voice-remote-name";
+    label.textContent = "Participante";
+    container.append(remoteVideo, label);
+    els.voiceRemotes.appendChild(container);
+
+    pc.ontrack = (event) => {
+      const stream = event.streams[0] || new MediaStream([event.track]);
+      if (event.track.kind === "audio") {
+        remoteAudio.srcObject = stream;
+        remoteAudio.play().catch(() => {});
+      } else if (event.track.kind === "video") {
+        remoteVideo.srcObject = stream;
+      }
+    };
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit("voice:ice", { to: peerId, candidate: event.candidate });
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+        removeVoicePeer(peerId);
+      }
+    };
+
+    state.voicePeers.set(peerId, { pc, audio: remoteAudio, video: remoteVideo, container });
+
+    if (isInitiator) {
+      (async () => {
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.emit("voice:offer", { to: peerId, sdp: pc.localDescription });
+        } catch (error) {
+          console.error("createOffer error", error);
+        }
+      })();
+    }
+
+    return pc;
+  }
+
+  function removeVoicePeer(peerId) {
+    const peer = state.voicePeers.get(peerId);
+    if (!peer) return;
+    try {
+      peer.pc.close();
+    } catch {}
+    peer.audio?.remove();
+    peer.video?.remove();
+    peer.container?.remove();
+    state.voicePeers.delete(peerId);
+    updateVoiceCount();
+    updateVoiceUI();
+  }
+
+  async function askVoiceAndCamera() {
+    if (state.voiceAsked) {
+      // Ya preguntamos antes en esta sesión; si aceptó, reactivar automáticamente
+      if (localStorage.getItem("multitube:voicePref") === "yes") {
+        await startVoice(true);
+      }
+      return;
+    }
+    state.voiceAsked = true;
+    sessionStorage.setItem("multitube:voiceAsked", "1");
+
+    const wantVoice = window.confirm("¿Quieres usar chat de voz en esta sala?");
+    localStorage.setItem("multitube:voicePref", wantVoice ? "yes" : "no");
+
+    if (wantVoice) {
+      try {
+        state.localAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        state.voiceActive = true;
+      } catch (error) {
+        toast("No se pudo acceder al micrófono");
+        state.voiceActive = false;
+      }
+    }
+
+    const wantCam = window.confirm("¿Quieres usar la cámara?");
+    if (wantCam) {
+      try {
+        state.localVideoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        if (state.voiceLocal) {
+          const combined = new MediaStream();
+          if (state.localAudioStream) state.localAudioStream.getAudioTracks().forEach((t) => combined.addTrack(t));
+          state.localVideoStream.getVideoTracks().forEach((t) => combined.addTrack(t));
+          state.voiceLocal.srcObject = combined;
+        }
+        // Renegociar con los peers existentes
+        for (const [peerId, peer] of state.voicePeers) {
+          state.localVideoStream.getVideoTracks().forEach((track) => {
+            peer.pc.addTrack(track, state.localVideoStream);
+          });
+          try {
+            const offer = await peer.pc.createOffer();
+            await peer.pc.setLocalDescription(offer);
+            socket.emit("voice:offer", { to: peerId, sdp: peer.pc.localDescription });
+          } catch (e) {
+            console.error("renegotiate error", e);
+          }
+        }
+        updateVoiceUI();
+      } catch (error) {
+        toast("No se pudo acceder a la cámara");
+      }
+    }
+
+    if (state.voiceActive || state.localVideoStream) {
+      await startVoice(false);
+    } else {
+      updateVoiceUI();
+    }
+  }
+
+  async function startVoice(isAuto) {
+    state.voiceActive = state.voiceActive || !!state.localAudioStream || !!state.localVideoStream;
+    if (!state.voiceActive && !state.localAudioStream && !state.localVideoStream) return;
+
+    if (state.voiceLocal && (state.localVideoStream || state.localAudioStream)) {
+      const combined = new MediaStream();
+      if (state.localAudioStream) state.localAudioStream.getAudioTracks().forEach((t) => combined.addTrack(t));
+      if (state.localVideoStream) state.localVideoStream.getVideoTracks().forEach((t) => combined.addTrack(t));
+      state.voiceLocal.srcObject = combined;
+    }
+
+    socket.emit("voice:join", {}, (response) => {
+      if (!response?.ok) {
+        toast(response?.error || "No se pudo unir al chat de voz");
+        return;
+      }
+      const peers = response.peers || [];
+      peers.forEach((peerId) => createPeerConnection(peerId, true));
+      updateVoiceUI();
+      updateVoiceCount();
+    });
+
+    updateVoiceUI();
+  }
+
+  function toggleMic() {
+    if (!state.localAudioStream) return;
+    const track = state.localAudioStream.getAudioTracks()[0];
+    if (!track) return;
+    track.enabled = !track.enabled;
+    updateVoiceUI();
+  }
+
+  function toggleCam() {
+    if (!state.localVideoStream) {
+      // pedir cámara ahora
+      navigator.mediaDevices
+        .getUserMedia({ video: true })
+        .then((stream) => {
+          state.localVideoStream = stream;
+          if (state.voiceLocal) {
+            const combined = new MediaStream();
+            if (state.localAudioStream) state.localAudioStream.getAudioTracks().forEach((t) => combined.addTrack(t));
+            state.localVideoStream.getVideoTracks().forEach((t) => combined.addTrack(t));
+            state.voiceLocal.srcObject = combined;
+          }
+          // agregar track a peers existentes
+          for (const [peerId, peer] of state.voicePeers) {
+            stream.getVideoTracks().forEach((track) => peer.pc.addTrack(track, stream));
+            (async () => {
+              try {
+                const offer = await peer.pc.createOffer();
+                await peer.pc.setLocalDescription(offer);
+                socket.emit("voice:offer", { to: peerId, sdp: peer.pc.localDescription });
+              } catch (e) {
+                console.error("renegotiate error", e);
+              }
+            })();
+          }
+          updateVoiceUI();
+        })
+        .catch(() => toast("No se pudo acceder a la cámara"));
+      return;
+    }
+    const track = state.localVideoStream.getVideoTracks()[0];
+    if (!track) return;
+    track.enabled = !track.enabled;
+    updateVoiceUI();
+  }
+
+  function hangupVoice() {
+    if (!state.voiceActive && !state.localAudioStream && !state.localVideoStream && state.voicePeers.size === 0) return;
+    socket.emit("voice:leave");
+    if (state.localAudioStream) {
+      state.localAudioStream.getTracks().forEach((t) => t.stop());
+      state.localAudioStream = null;
+    }
+    if (state.localVideoStream) {
+      state.localVideoStream.getTracks().forEach((t) => t.stop());
+      state.localVideoStream = null;
+    }
+    state.voiceActive = false;
+    state.voicePeers.forEach((peer) => {
+      try {
+        peer.pc.close();
+      } catch {}
+      peer.audio?.remove();
+      peer.video?.remove();
+      peer.container?.remove();
+    });
+    state.voicePeers.clear();
+    if (state.voiceLocal) state.voiceLocal.srcObject = null;
+    updateVoiceUI();
+    updateVoiceCount();
+    toast("📞 Colgaste el chat de voz");
+  }
+
+  /* ------------------------------------------------------------
      Modal
      ------------------------------------------------------------ */
 
@@ -1500,9 +1847,17 @@
         const tab = button.dataset.tab;
         els.tabQueue.classList.toggle("hidden", tab !== "queue");
         els.tabSuggest.classList.toggle("hidden", tab !== "suggest");
+        els.tabVoice.classList.toggle("hidden", tab !== "voice");
         els.tabChat.classList.toggle("hidden", tab !== "chat");
       });
     });
+
+    els.voiceEnable.addEventListener("click", async () => {
+      await askVoiceAndCamera();
+    });
+    els.voiceMic.addEventListener("click", toggleMic);
+    els.voiceCam.addEventListener("click", toggleCam);
+    els.voiceHangup.addEventListener("click", hangupVoice);
 
     els.btnOpenSearch.addEventListener("click", openImmersive);
     els.ytClose.addEventListener("click", closeImmersive);
