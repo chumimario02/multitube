@@ -77,6 +77,7 @@
     ytChips: $("#yt-chips"),
     ytStatus: $("#yt-status"),
     ytGrid: $("#yt-grid"),
+    ytLoadMore: $("#yt-load-more"),
     ytEmpty: $("#yt-empty"),
     ytGate: $("#yt-gate"),
     ytGateTitle: $("#yt-gate-title"),
@@ -964,6 +965,7 @@
         ytRecommendations();
       } else {
         els.ytEmpty.classList.toggle("hidden", Boolean(els.ytGrid.children.length));
+        els.ytLoadMore.classList.toggle("hidden", !state.ytNextToken);
       }
       setTimeout(() => els.ytSearchInput.focus(), 80);
     }
@@ -974,6 +976,7 @@
     document.body.classList.remove("immersive-open");
     els.ytStatus.textContent = "";
     els.ytStatus.classList.remove("error");
+    els.ytLoadMore.classList.add("hidden");
   }
 
   function updateYtGate() {
@@ -1001,6 +1004,7 @@
 
   async function ytSearch(query) {
     query = String(query || "").trim();
+    state.ytMode = "search";
     state.ytQuery = query;
     state.ytNextToken = null;
     state.ytLoadingMore = false;
@@ -1031,6 +1035,7 @@
       els.ytEmpty.classList.add("hidden");
       els.ytStatus.textContent = response.error || "No se pudo buscar.";
       els.ytStatus.classList.add("error");
+      els.ytLoadMore.classList.add("hidden");
       return;
     }
 
@@ -1039,27 +1044,38 @@
     state.ytNextToken = response.nextPageToken || null;
     if (!(response.items || []).length) {
       els.ytEmpty.classList.remove("hidden");
+      els.ytLoadMore.classList.add("hidden");
+    } else {
+      els.ytLoadMore.classList.toggle("hidden", !state.ytNextToken);
+      els.ytLoadMore.textContent = "Cargar más resultados";
     }
   }
 
   async function loadMoreYt() {
-    if (state.ytLoadingMore || !state.ytNextToken || !state.ytQuery) return;
+    if (state.ytLoadingMore || !state.ytNextToken) return;
     if (els.immersive.classList.contains("hidden")) return;
     state.ytLoadingMore = true;
 
-    const spinner = document.createElement("div");
-    spinner.className = "yt-loading-more";
-    spinner.textContent = "Cargando más videos…";
-    els.ytGrid.appendChild(spinner);
-
     const token = state.ytNextToken;
-    const response = await emitAck("search:query", {
-      q: state.ytQuery,
-      pageToken: token,
-    }, 25000);
+    els.ytLoadMore.disabled = true;
+    els.ytLoadMore.textContent = "Cargando…";
 
-    spinner.remove();
+    let response;
+    if (state.ytMode === "recommendations") {
+      response = await emitAck("recommendations:get", {
+        region: state.ytRegion,
+        pageToken: token,
+      }, 25000);
+    } else {
+      response = await emitAck("search:query", {
+        q: state.ytQuery,
+        pageToken: token,
+      }, 25000);
+    }
+
     state.ytLoadingMore = false;
+    els.ytLoadMore.disabled = false;
+    els.ytLoadMore.textContent = "Cargar más resultados";
 
     if (!response.ok) {
       els.ytStatus.textContent = response.error || "No se pudo cargar más.";
@@ -1071,8 +1087,9 @@
       renderYtResults(response.items, true);
     }
     state.ytNextToken = response.nextPageToken || null;
+    els.ytLoadMore.classList.toggle("hidden", !state.ytNextToken);
     if (!state.ytNextToken) {
-      els.ytStatus.textContent = `${els.ytGrid.children.length} resultados · fin de la búsqueda`;
+      els.ytStatus.textContent = `${els.ytGrid.children.length} resultados · fin`;
     }
   }
 
@@ -1087,35 +1104,42 @@
       return;
     }
 
+    state.ytMode = "recommendations";
     state.ytQuery = "";
     state.ytNextToken = null;
     state.ytLoadingMore = false;
+    state.ytRegion = state.ytRegion || (navigator.language || "en-US").slice(-2).toUpperCase() || "US";
 
     els.ytEmpty.classList.add("hidden");
     els.ytGate.classList.add("hidden");
     els.ytStatus.textContent = "Cargando recomendaciones…";
     els.ytStatus.classList.remove("error");
+    els.ytLoadMore.classList.add("hidden");
     renderYtSkeletons();
 
-    const response = await emitAck("recommendations:get", {}, 25000);
+    const response = await emitAck("recommendations:get", { region: state.ytRegion }, 25000);
     if (!response.ok) {
       els.ytGrid.innerHTML = "";
       els.ytStatus.textContent = response.error || "No se pudieron cargar recomendaciones.";
       els.ytStatus.classList.add("error");
       els.ytEmpty.classList.remove("hidden");
+      els.ytLoadMore.classList.add("hidden");
       return;
     }
 
     els.ytGrid.innerHTML = "";
     renderYtResults(response.items || [], false);
-    state.ytNextToken = null;
+    state.ytNextToken = response.nextPageToken || null;
     if (!(response.items || []).length) {
       els.ytEmpty.classList.remove("hidden");
       els.ytStatus.textContent = "No hay recomendaciones disponibles.";
+      els.ytLoadMore.classList.add("hidden");
     } else {
       els.ytStatus.textContent = `${(response.items || []).length} recomendados · ${
         state.isHost ? "se agregan a la cola" : "se sugieren al host"
       }`;
+      els.ytLoadMore.classList.toggle("hidden", !state.ytNextToken);
+      els.ytLoadMore.textContent = "Cargar más resultados";
     }
   }
 
@@ -1590,14 +1614,8 @@
     setInterval(tick, 400);
     setInterval(hostHeartbeat, 5000);
 
-    if (els.ytMain) {
-      els.ytMain.addEventListener("scroll", () => {
-        if (els.immersive.classList.contains("hidden")) return;
-        const el = els.ytMain;
-        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300) {
-          loadMoreYt();
-        }
-      });
+    if (els.ytLoadMore) {
+      els.ytLoadMore.addEventListener("click", loadMoreYt);
     }
   }
 

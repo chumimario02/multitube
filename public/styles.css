@@ -2509,6 +2509,27 @@ body.immersive-open {
   font-size: 0.82rem;
 }
 
+.yt-load-more {
+  display: block;
+  margin: 22px auto 0;
+  padding: 12px 26px;
+  border-radius: 999px;
+  background: #272727;
+  color: #f1f1f1;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: background 0.2s, transform 0.15s;
+}
+
+.yt-load-more:hover {
+  background: #3f3f3f;
+}
+
+.yt-load-more:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

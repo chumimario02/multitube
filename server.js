@@ -393,14 +393,15 @@ async function searchYouTube(apiKey, query, pageToken) {
   return { items, nextPageToken: data.nextPageToken || null };
 }
 
-async function fetchRecommendations(apiKey, region) {
+async function fetchRecommendations(apiKey, region, pageToken) {
   const params = new URLSearchParams({
     part: "snippet,contentDetails,statistics",
     chart: "mostPopular",
-    maxResults: "25",
+    maxResults: "50",
     regionCode: region,
     key: apiKey,
   });
+  if (pageToken) params.set("pageToken", pageToken);
 
   let response;
   try {
@@ -440,7 +441,7 @@ async function fetchRecommendations(apiKey, region) {
     item.ago = timeAgo(item.publishedAt);
   }
 
-  return items;
+  return { items, nextPageToken: data.nextPageToken || null };
 }
 
 /* ------------------------------------------------------------------ */
@@ -711,19 +712,25 @@ io.on("connection", (socket) => {
     const region = String(data.region || "US")
       .toUpperCase()
       .slice(0, 2) || "US";
+    const pageToken = String(data.pageToken || "").trim() || null;
+
     const cacheKey = `__rec__${region}`;
-    const cached = room.searchCache.get(cacheKey);
-    if (cached && now - cached.at < 10 * 60 * 1000) {
-      return respond({ ok: true, items: cached.items });
+    if (!pageToken) {
+      const cached = room.searchCache.get(cacheKey);
+      if (cached && now - cached.at < 10 * 60 * 1000) {
+        return respond({ ok: true, items: cached.items, nextPageToken: cached.nextPageToken });
+      }
     }
 
     try {
-      const items = await fetchRecommendations(room.apiKey, region);
-      room.searchCache.set(cacheKey, { at: now, items, nextPageToken: null });
-      if (room.searchCache.size > 20) {
-        room.searchCache.delete(room.searchCache.keys().next().value);
+      const result = await fetchRecommendations(room.apiKey, region, pageToken);
+      if (!pageToken) {
+        room.searchCache.set(cacheKey, { at: now, items: result.items, nextPageToken: result.nextPageToken });
+        if (room.searchCache.size > 20) {
+          room.searchCache.delete(room.searchCache.keys().next().value);
+        }
       }
-      respond({ ok: true, items });
+      respond({ ok: true, items: result.items, nextPageToken: result.nextPageToken });
     } catch (error) {
       respond({ ok: false, error: error.message || "No se pudieron cargar recomendaciones." });
     }
