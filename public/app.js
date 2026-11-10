@@ -1732,11 +1732,11 @@
       updateVoiceCount();
     });
 
-    // Vista propia si hay cámara
-    if (state.localVideoStream) {
+    // Vista propia (audio y/o video)
+    if (state.localAudioStream || state.localVideoStream) {
       const selfStream = new MediaStream();
       if (state.localAudioStream) state.localAudioStream.getAudioTracks().forEach((t) => selfStream.addTrack(t));
-      state.localVideoStream.getVideoTracks().forEach((t) => selfStream.addTrack(t));
+      if (state.localVideoStream) state.localVideoStream.getVideoTracks().forEach((t) => selfStream.addTrack(t));
       createFloater("self", "Tú", selfStream);
     }
 
