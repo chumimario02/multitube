@@ -60,7 +60,6 @@
     queueEmpty: $("#queue-empty"),
     tabQueue: $("#tab-queue"),
     tabSuggest: $("#tab-suggest"),
-    tabVoice: $("#tab-voice"),
     tabChat: $("#tab-chat"),
     suggestList: $("#suggest-list"),
     suggestCount: $("#suggest-count"),
@@ -78,8 +77,6 @@
     voiceMic: $("#voice-mic"),
     voiceCam: $("#voice-cam"),
     voiceHangup: $("#voice-hangup"),
-    voiceLocal: $("#voice-local"),
-    voiceRemotes: $("#voice-remotes"),
     voiceCount: $("#voice-count"),
     voiceFloaters: $("#voice-floaters"),
     chatMessages: $("#chat-messages"),
@@ -1652,26 +1649,15 @@
     const remoteAudio = document.createElement("audio");
     remoteAudio.autoplay = true;
     remoteAudio.playsInline = true;
-
-    const remoteVideo = document.createElement("video");
-    remoteVideo.autoplay = true;
-    remoteVideo.playsInline = true;
-    remoteVideo.muted = false;
-
-    const container = document.createElement("div");
-    container.className = "voice-remote";
-    container.dataset.peer = peerId;
-    const label = document.createElement("span");
-    label.className = "voice-remote-name";
-    label.textContent = "Participante";
-    container.append(remoteVideo, label);
-    els.voiceRemotes.appendChild(container);
+    // Keep audio element in the DOM so it can play (some browsers need it attached)
+    remoteAudio.style.display = "none";
+    document.body.appendChild(remoteAudio);
 
     const peer = {
       pc,
       audio: remoteAudio,
-      video: remoteVideo,
-      container,
+      video: null,
+      container: null,
       stream: new MediaStream(),
       name: (state.voicePeerNames && state.voicePeerNames.get(peerId)) || "Participante",
     };
@@ -1683,8 +1669,6 @@
       if (track.kind === "audio") {
         remoteAudio.srcObject = peer.stream;
         remoteAudio.play().catch(() => {});
-      } else if (track.kind === "video") {
-        remoteVideo.srcObject = peer.stream;
       }
       const floater = state.voiceFloaters.get(peerId);
       if (floater) {
@@ -1875,7 +1859,7 @@
       updateVoiceCount();
     });
 
-    // Vista propia (audio y/o video)
+    // Vista propia (audio y/o video) -> ventanita flotante inmediata
     if (state.localAudioStream || state.localVideoStream) {
       const selfStream = new MediaStream();
       if (state.localAudioStream) state.localAudioStream.getAudioTracks().forEach((t) => selfStream.addTrack(t));
@@ -1905,7 +1889,6 @@
             const combined = new MediaStream();
             if (state.localAudioStream) state.localAudioStream.getAudioTracks().forEach((t) => combined.addTrack(t));
             state.localVideoStream.getVideoTracks().forEach((t) => combined.addTrack(t));
-            state.voiceLocal.srcObject = combined;
           }
           const selfStream = new MediaStream();
           if (state.localAudioStream) state.localAudioStream.getAudioTracks().forEach((t) => selfStream.addTrack(t));
@@ -1952,8 +1935,6 @@
         peer.pc.close();
       } catch {}
       peer.audio?.remove();
-      peer.video?.remove();
-      peer.container?.remove();
     });
     state.voicePeers.clear();
     if (state.voiceLocal) state.voiceLocal.srcObject = null;
