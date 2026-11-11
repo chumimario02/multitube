@@ -2824,8 +2824,9 @@ body.immersive-open {
   justify-content: space-between;
   gap: 8px;
   padding: 7px 10px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03));
+  touch-action: none;
   cursor: grab;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03));
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -2866,6 +2867,7 @@ body.immersive-open {
   background: #000;
   object-fit: cover;
   display: block;
+  touch-action: pan-y;
 }
 
 .voice-floater-audio {

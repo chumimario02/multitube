@@ -1601,6 +1601,7 @@
     closeBtn.title = "Ocultar";
     closeBtn.addEventListener("click", () => {
       el.style.display = "none";
+      layoutFloaters();
     });
 
     bar.append(nameEl, closeBtn);
@@ -1628,21 +1629,13 @@
     video.style.display = "none";
     audioTile.style.display = "flex";
 
-    // Posición: cascada desde arriba-derecha para que siempre sea visible
-    const idx = state.floaterIndex++;
-    const vw = window.innerWidth || 360;
-    const offset = (idx % 5) * 15;
-    const baseX = Math.max(8, vw - 250 - offset);
-    const baseY = Math.max(60, 70 + offset);
-    el.style.left = `${baseX}px`;
-    el.style.top = `${baseY}px`;
-
     els.voiceFloaters.appendChild(el);
 
     const floater = { el, video, audioTile, name };
     state.voiceFloaters.set(id, floater);
 
     makeDraggable(el, bar);
+    layoutFloaters();
 
     if (stream) {
       updateFloaterMedia(floater, stream);
@@ -1673,63 +1666,95 @@
     if (!floater) return;
     floater.el.remove();
     state.voiceFloaters.delete(id);
+    layoutFloaters();
   }
 
+  // Coloca las ventanitas una al lado de la otra (sin superponerse).
+  let floatersResizeBound = false;
+  function layoutFloaters() {
+    if (!floatersResizeBound) {
+      floatersResizeBound = true;
+      window.addEventListener("resize", () => layoutFloaters());
+    }
+    if (!els.voiceFloaters) return;
+
+    const vw = window.innerWidth || 360;
+    const margin = 12;
+    const gap = 10;
+    const width = vw <= 720 ? 160 : 260;
+    const list = [...state.voiceFloaters.values()].filter(
+      (f) => f.el && f.el.style.display !== "none"
+    );
+
+    let x = vw - margin - width;
+    let y = 70;
+    let rowHeight = 0;
+
+    list.forEach((f) => {
+      const h = f.el.offsetHeight || Math.round(width * 0.75) + 40;
+      if (x < margin) {
+        x = vw - margin - width;
+        y += rowHeight + gap;
+        rowHeight = 0;
+      }
+      f.el.style.left = `${Math.max(margin, x)}px`;
+      f.el.style.top = `${y}px`;
+      rowHeight = Math.max(rowHeight, h);
+      x -= width + gap;
+    });
+  }
+
+  // Arrastre con Pointer Events: funciona con dedo (Android) y ratón.
+  // Solo bloquea el scroll de la página mientras se arrastra la ventanita.
   function makeDraggable(el, handle) {
     let dragging = false;
+    let pointerId = null;
     let offsetX = 0;
     let offsetY = 0;
 
-    const startDrag = (clientX, clientY) => {
+    handle.style.touchAction = "none";
+
+    const startDrag = (e) => {
+      if (e.target.closest("button")) return;
+      if (e.pointerType === "mouse" && e.button !== 0) return;
       dragging = true;
+      pointerId = e.pointerId;
+      try { handle.setPointerCapture(e.pointerId); } catch {}
       const rect = el.getBoundingClientRect();
-      offsetX = clientX - rect.left;
-      offsetY = clientY - rect.top;
+      offsetX = e.clientX - rect.left;
+      offsetY = e.clientY - rect.top;
       el.style.zIndex = "71";
+      e.preventDefault();
     };
 
-    const moveDrag = (clientX, clientY) => {
-      if (!dragging) return;
-      let x = clientX - offsetX;
-      let y = clientY - offsetY;
+    const moveDrag = (e) => {
+      if (!dragging || e.pointerId !== pointerId) return;
+      let x = e.clientX - offsetX;
+      let y = e.clientY - offsetY;
       x = Math.max(0, Math.min(window.innerWidth - el.offsetWidth, x));
       y = Math.max(0, Math.min(window.innerHeight - el.offsetHeight, y));
       el.style.left = `${x}px`;
       el.style.top = `${y}px`;
-    };
-
-    const endDrag = () => {
-      if (dragging) {
-        dragging = false;
-        el.style.zIndex = "70";
-      }
-    };
-
-    handle.addEventListener("mousedown", (e) => {
-      startDrag(e.clientX, e.clientY);
       e.preventDefault();
+    };
+
+    const endDrag = (e) => {
+      if (!dragging || (e && e.pointerId !== pointerId)) return;
+      dragging = false;
+      pointerId = null;
+      try { handle.releasePointerCapture(e.pointerId); } catch {}
+      el.style.zIndex = "70";
+    };
+
+    handle.addEventListener("pointerdown", startDrag);
+    handle.addEventListener("pointermove", moveDrag);
+    handle.addEventListener("pointerup", endDrag);
+    handle.addEventListener("pointercancel", endDrag);
+    handle.addEventListener("lostpointercapture", () => {
+      dragging = false;
+      pointerId = null;
+      el.style.zIndex = "70";
     });
-    handle.addEventListener("touchstart", (e) => {
-      if (e.touches && e.touches.length) {
-        startDrag(e.touches[0].clientX, e.touches[0].clientY);
-      }
-      e.preventDefault();
-    }, { passive: false });
-
-    const onMouseMove = (e) => moveDrag(e.clientX, e.clientY);
-    const onTouchMove = (e) => {
-      if (e.touches && e.touches.length) {
-        moveDrag(e.touches[0].clientX, e.touches[0].clientY);
-      }
-      e.preventDefault();
-    };
-    const onEnd = () => endDrag();
-
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onEnd);
-    document.addEventListener("touchmove", onTouchMove, { passive: false });
-    document.addEventListener("touchend", onEnd);
-    document.addEventListener("touchcancel", onEnd);
   }
 
   function createPeerConnection(peerId, isInitiator, addTracks = true) {
