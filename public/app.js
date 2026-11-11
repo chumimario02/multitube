@@ -351,21 +351,9 @@
       if (!from || !sdp) return;
       if (!state.voiceActive && !state.localAudioStream && !state.localVideoStream) return;
       // Crear la conexión sin agregar tracks primero
-      const pc = createPeerConnection(from, false, false);
+      const pc = createPeerConnection(from, false);
       try {
-        // Primero establecer el remote desc (transceivers del offer)
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-        // Luego agregar nuestros tracks (se asocian a los transceivers existentes)
-        if (state.localAudioStream) {
-          state.localAudioStream.getAudioTracks().forEach((track) => {
-            try { pc.addTrack(track, state.localAudioStream); } catch (e) {}
-          });
-        }
-        if (state.localVideoStream) {
-          state.localVideoStream.getVideoTracks().forEach((track) => {
-            try { pc.addTrack(track, state.localVideoStream); } catch (e) {}
-          });
-        }
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         socket.emit("voice:answer", { to: from, sdp: pc.localDescription });
