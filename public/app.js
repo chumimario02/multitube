@@ -1572,6 +1572,7 @@
     video.autoplay = true;
     video.playsInline = true;
     video.muted = id === "self";
+    video.style.display = "none";
 
     const audioTile = document.createElement("div");
     audioTile.className = "voice-floater-audio";
@@ -1605,7 +1606,13 @@
 
     makeDraggable(el, bar);
 
-    if (stream) updateFloaterMedia(floater, stream);
+    if (stream) {
+      updateFloaterMedia(floater, stream);
+    } else {
+      // Sin stream: mostrar solo el tile de audio
+      video.style.display = "none";
+      audioTile.style.display = "flex";
+    }
 
     return floater;
   }
@@ -1698,11 +1705,17 @@
       state.localAudioStream.getAudioTracks().forEach((track) => {
         pc.addTrack(track, state.localAudioStream);
       });
+    } else {
+      // Sin micrófono propio: recibir audio del otro (solo recepción)
+      try { pc.addTransceiver("audio", { direction: "recvonly" }); } catch {}
     }
     if (state.localVideoStream) {
       state.localVideoStream.getVideoTracks().forEach((track) => {
         pc.addTrack(track, state.localVideoStream);
       });
+    } else {
+      // Sin cámara propia: recibir video del otro (solo recepción)
+      try { pc.addTransceiver("video", { direction: "recvonly" }); } catch {}
     }
 
     const remoteAudio = document.createElement("audio");
