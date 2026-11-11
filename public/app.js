@@ -327,9 +327,13 @@
       if (!fromId || fromId === state.youId) return;
       if (!state.voicePeerNames) state.voicePeerNames = new Map();
       state.voicePeerNames.set(fromId, name || "Participante");
-      createFloater(fromId, name || "Participante", null);
+      const floater = createFloater(fromId, name || "Participante", null);
+      if (floater) {
+        floater.el.style.display = "block";
+        floater.el.style.zIndex = "999";
+      }
       updateVoiceCount();
-      toast(`🎤 ${name || "Alguien"} se unió al chat de voz`);
+      toast(`🎤 ${name || "Alguien"} se unió. Mira su ventanita flotante.`);
 
       // Si yo no estoy en voz, crear conexión solo-recepción para ver/oír al otro
       if (!state.voiceActive && !state.localAudioStream && !state.localVideoStream) {
@@ -396,11 +400,17 @@
 
     els.createSubmit.disabled = true;
     els.createSubmit.textContent = "Creando…";
-    const response = await emitAck("room:create", { name });
+    // Cerrar el modal de inmediato para que no quede "pegado"
+    closeModal();
+
+    const response = await emitAck("room:create", { name }, 30000);
     els.createSubmit.disabled = false;
     els.createSubmit.textContent = "Crear sala";
 
-    if (!response.ok) return toast(response.error || "No se pudo crear la sala");
+    if (!response.ok) {
+      toast(response.error || "No se pudo crear la sala. Intenta de nuevo.");
+      return;
+    }
     onJoined(response, name);
   }
 
@@ -412,11 +422,17 @@
 
     els.joinSubmit.disabled = true;
     els.joinSubmit.textContent = "Entrando…";
-    const response = await emitAck("room:join", { name, code });
+    // Cerrar el modal de inmediato
+    closeModal();
+
+    const response = await emitAck("room:join", { name, code }, 30000);
     els.joinSubmit.disabled = false;
     els.joinSubmit.textContent = "Entrar";
 
-    if (!response.ok) return toast(response.error || "No se pudo entrar a la sala");
+    if (!response.ok) {
+      toast(response.error || "No se pudo entrar a la sala. Intenta de nuevo.");
+      return;
+    }
     onJoined(response, name);
   }
 
