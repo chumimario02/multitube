@@ -1777,51 +1777,27 @@
     state.voiceAsked = true;
     sessionStorage.setItem("multitube:voiceAsked", "1");
 
-    const audioStream = await askPermissionModal(
-      "🎤",
-      "¿Quieres usar chat de voz?",
-      "Se te pedirá permiso para el micrófono.",
-      { audio: true }
+    // Una sola pregunta para voz y cámara juntas.
+    // getUserMedia se ejecuta DENTRO del click del botón (gesto de usuario).
+    const stream = await askPermissionModal(
+      "🎤📹",
+      "¿Quieres usar chat de voz y cámara?",
+      "Se te pedirá permiso para el micrófono y la cámara.",
+      { audio: true, video: true }
     );
-    const wantVoice = !!audioStream;
-    localStorage.setItem("multitube:voicePref", wantVoice ? "yes" : "no");
 
-    if (wantVoice) {
-      state.localAudioStream = audioStream;
-      state.voiceActive = true;
-    } else {
+    const accepted = !!stream;
+    localStorage.setItem("multitube:voicePref", accepted ? "yes" : "no");
+
+    if (!accepted) {
       state.voiceActive = false;
+      updateVoiceUI();
+      return;
     }
 
-    const videoStream = await askPermissionModal(
-      "📹",
-      "¿Quieres usar la cámara?",
-      "Se te pedirá permiso para la cámara.",
-      { video: true }
-    );
-    if (videoStream) {
-      state.localVideoStream = videoStream;
-      if (state.voiceLocal) {
-        const combined = new MediaStream();
-        if (state.localAudioStream) state.localAudioStream.getAudioTracks().forEach((t) => combined.addTrack(t));
-        state.localVideoStream.getVideoTracks().forEach((t) => combined.addTrack(t));
-        state.voiceLocal.srcObject = combined;
-      }
-      // Renegociar con los peers existentes
-      for (const [peerId, peer] of state.voicePeers) {
-        state.localVideoStream.getVideoTracks().forEach((track) => {
-          peer.pc.addTrack(track, state.localVideoStream);
-        });
-        try {
-          const offer = await peer.pc.createOffer();
-          await peer.pc.setLocalDescription(offer);
-          socket.emit("voice:offer", { to: peerId, sdp: peer.pc.localDescription });
-        } catch (e) {
-          console.error("renegotiate error", e);
-        }
-      }
-      updateVoiceUI();
-    }
+    state.localAudioStream = stream;
+    state.localVideoStream = stream;
+    state.voiceActive = true;
 
     if (state.voiceActive || state.localVideoStream) {
       await startVoice(false);
