@@ -443,7 +443,7 @@
     updateKeyUI();
 
     if (!state.voiceAsked || localStorage.getItem("multitube:voicePref") === "yes") {
-      setTimeout(() => askVoiceAndCamera(), 700);
+      askVoiceAndCamera();
     }
 
     if (!silent) {
@@ -521,6 +521,9 @@
     updateKeyUI();
     showCover(!room.current);
     syncFromState(room);
+
+    // Sincronizar ventanitas de voz con el estado de la sala
+    syncVoiceFloaters(room.voicePeers || []);
   }
 
   function syncFromState(room) {
@@ -1472,6 +1475,25 @@
   const RTC_CONFIG = {
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
   };
+
+  function syncVoiceFloaters(peers) {
+    const peerIds = new Set((peers || []).map((p) => p.id));
+    // Crear floaters para peers que no los tienen
+    (peers || []).forEach((peer) => {
+      if (peer.id === state.youId) return;
+      if (!state.voiceFloaters.has(peer.id)) {
+        createFloater(peer.id, peer.name || "Participante", null);
+      }
+    });
+    // Eliminar floaters de peers que ya no están en voz (excepto self)
+    for (const id of state.voiceFloaters.keys()) {
+      if (id === "self") continue;
+      if (!peerIds.has(id)) {
+        removeFloater(id);
+      }
+    }
+    updateVoiceCount();
+  }
 
   function updateVoiceCount() {
     const count = state.voicePeers.size + (state.voiceActive ? 1 : 0);

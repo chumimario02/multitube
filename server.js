@@ -90,6 +90,10 @@ function serializeRoom(room) {
     suggestions: room.suggestions,
     hasKey: Boolean(room.apiKey),
     shareKey: room.shareKey,
+    voicePeers: [...(room.voicePeers || [])].map((id) => ({
+      id,
+      name: room.members.get(id)?.name || "Participante",
+    })),
     members: [...room.members.entries()].map(([id, member]) => ({
       id,
       name: member.name,
@@ -884,6 +888,7 @@ io.on("connection", (socket) => {
       name: room.members.get(socket.id)?.name || "Anónimo",
     });
 
+    broadcastState(room);
     ack?.({ ok: true, peers });
   });
 
@@ -893,6 +898,7 @@ io.on("connection", (socket) => {
     room.voicePeers?.delete(socket.id);
     socket.data.inVoice = false;
     socket.to(roomKey(room.code)).emit("voice:peer-left", { fromId: socket.id });
+    broadcastState(room);
   });
 
   socket.on("voice:offer", (payload) => {
