@@ -1585,12 +1585,16 @@
 
     el.append(bar, video, audioTile);
 
-    // Posición en cascada desde el centro (asegurar que esté visible)
+    // Estado inicial: ocultar video, mostrar audio tile
+    video.style.display = "none";
+    audioTile.style.display = "flex";
+
+    // Posición: cascada desde arriba-derecha para que siempre sea visible
     const idx = state.floaterIndex++;
     const vw = window.innerWidth || 360;
-    const vh = window.innerHeight || 640;
-    const baseX = Math.max(8, vw / 2 - 115 + (idx % 4) * 20);
-    const baseY = Math.max(60, vh / 2 - 90 + (idx % 4) * 20);
+    const offset = (idx % 5) * 15;
+    const baseX = Math.max(8, vw - 250 - offset);
+    const baseY = Math.max(60, 70 + offset);
     el.style.left = `${baseX}px`;
     el.style.top = `${baseY}px`;
 
