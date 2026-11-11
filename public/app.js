@@ -330,6 +330,11 @@
       createFloater(fromId, name || "Participante", null);
       updateVoiceCount();
       toast(`🎤 ${name || "Alguien"} se unió al chat de voz`);
+
+      // Si yo no estoy en voz, crear conexión solo-recepción para ver/oír al otro
+      if (!state.voiceActive && !state.localAudioStream && !state.localVideoStream) {
+        createPeerConnection(fromId, true); // initiate as receiver (no local tracks)
+      }
     });
 
     socket.on("voice:peer-left", ({ fromId } = {}) => {
@@ -1815,15 +1820,19 @@
   }
 
   async function startVoice(isAuto) {
+    // Cerrar conexiones previas (solo-recepción) antes de unirse como participante
+    for (const [peerId, peer] of state.voicePeers) {
+      try { peer.pc.close(); } catch {}
+      peer.audio?.remove();
+    }
+    state.voicePeers.clear();
+    for (const id of state.voiceFloaters.keys()) removeFloater(id);
+    state.floaterIndex = 0;
+
     state.voiceActive = state.voiceActive || !!state.localAudioStream || !!state.localVideoStream;
     if (!state.voiceActive && !state.localAudioStream && !state.localVideoStream) return;
 
-    if (state.voiceLocal && (state.localVideoStream || state.localAudioStream)) {
-      const combined = new MediaStream();
-      if (state.localAudioStream) state.localAudioStream.getAudioTracks().forEach((t) => combined.addTrack(t));
-      if (state.localVideoStream) state.localVideoStream.getVideoTracks().forEach((t) => combined.addTrack(t));
-      state.voiceLocal.srcObject = combined;
-    }
+    // (vista previa local eliminada; las ventanitas flotantes cubren esto)
 
     socket.emit("voice:join", {}, (response) => {
       if (!response?.ok) {
@@ -1869,11 +1878,7 @@
         .getUserMedia({ video: true })
         .then((stream) => {
           state.localVideoStream = stream;
-          if (state.voiceLocal) {
-            const combined = new MediaStream();
-            if (state.localAudioStream) state.localAudioStream.getAudioTracks().forEach((t) => combined.addTrack(t));
-            state.localVideoStream.getVideoTracks().forEach((t) => combined.addTrack(t));
-          }
+          // (vista previa local eliminada)
           const selfStream = new MediaStream();
           if (state.localAudioStream) state.localAudioStream.getAudioTracks().forEach((t) => selfStream.addTrack(t));
           state.localVideoStream.getVideoTracks().forEach((t) => selfStream.addTrack(t));
@@ -1921,7 +1926,7 @@
       peer.audio?.remove();
     });
     state.voicePeers.clear();
-    if (state.voiceLocal) state.voiceLocal.srcObject = null;
+    // (vista previa local eliminada)
     // remove all floaters
     for (const id of state.voiceFloaters.keys()) removeFloater(id);
     state.floaterIndex = 0;
