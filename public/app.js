@@ -349,11 +349,20 @@
 
     socket.on("voice:offer", async ({ from, sdp } = {}) => {
       if (!from || !sdp) return;
-      if (!state.voiceActive && !state.localAudioStream && !state.localVideoStream) return;
-      // Crear la conexión sin agregar tracks primero
-      const pc = createPeerConnection(from, false);
+      const hasMedia = !!(state.localAudioStream || state.localVideoStream);
+      const pc = createPeerConnection(from, false, hasMedia);
       try {
+        // Si estábamos en medio de una oferta propia (glare), revertir.
+        if (pc.signalingState === "have-local-offer") {
+          try { await pc.setLocalDescription({ type: "rollback" }); } catch {}
+        }
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        const peer = state.voicePeers.get(from);
+        if (peer?.pendingIce?.length) {
+          for (const candidate of peer.pendingIce.splice(0)) {
+            try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
+          }
+        }
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         socket.emit("voice:answer", { to: from, sdp: pc.localDescription });
@@ -369,6 +378,11 @@
       if (!peer) return;
       try {
         await peer.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        if (peer.pendingIce?.length) {
+          for (const candidate of peer.pendingIce.splice(0)) {
+            try { await peer.pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
+          }
+        }
       } catch (error) {
         console.error("voice answer error", error);
       }
@@ -378,6 +392,10 @@
       if (!from || !candidate) return;
       const peer = state.voicePeers.get(from);
       if (!peer) return;
+      if (!peer.pc.remoteDescription) {
+        peer.pendingIce.push(candidate);
+        return;
+      }
       try {
         await peer.pc.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (error) {
@@ -1506,6 +1524,15 @@
       if (!state.voiceFloaters.has(peer.id)) {
         createFloater(peer.id, peer.name || "Participante", null);
       }
+      // Si yo no tengo cámara/micrófono y aún no hay conexión con este peer,
+      // iniciar una conexión de solo recepción para verlo/oírlo.
+      if (!state.voicePeers.has(peer.id)) {
+        if (!state.localAudioStream && !state.localVideoStream) {
+          if (!state.voicePeerNames) state.voicePeerNames = new Map();
+          state.voicePeerNames.set(peer.id, peer.name || "Participante");
+          createPeerConnection(peer.id, true, false);
+        }
+      }
     });
     // Eliminar floaters de peers que ya no están en voz (excepto self)
     for (const id of state.voiceFloaters.keys()) {
@@ -1518,8 +1545,17 @@
   }
 
   function updateVoiceCount() {
-    const count = state.voicePeers.size + (state.voiceActive ? 1 : 0);
-    els.voiceCount.textContent = state.voicePeers.size;
+    const count = (state.room?.voicePeers || []).length || state.voicePeers.size;
+    // #voice-count puede no existir en algunas versiones del HTML: no romper la UI
+    if (els.voiceCount) els.voiceCount.textContent = count;
+    if (els.voiceStatus) {
+      const active = state.voiceActive || !!state.localAudioStream || !!state.localVideoStream;
+      els.voiceStatus.textContent = active
+        ? `Conectado · ${count} en voz`
+        : count > 0
+        ? `👀 ${count} en voz`
+        : "Chat de voz desactivado";
+    }
   }
 
   function updateVoiceUI() {
@@ -1703,16 +1739,19 @@
 
     const pc = new RTCPeerConnection(RTC_CONFIG);
 
+    // Adjuntar nuestros tracks (si existen). Si no tenemos de un tipo, dejamos
+    // el transceiver en recvonly para que el otro pueda enviarnos ese tipo.
+    const localAudioTrack = state.localAudioStream?.getAudioTracks?.()[0] || null;
+    const localVideoTrack = state.localVideoStream?.getVideoTracks?.()[0] || null;
+
     if (addTracks) {
-      if (state.localAudioStream) {
-        state.localAudioStream.getAudioTracks().forEach((track) => {
-          pc.addTrack(track, state.localAudioStream);
-        });
+      if (localAudioTrack) pc.addTrack(localAudioTrack, state.localAudioStream);
+      else {
+        try { pc.addTransceiver("audio", { direction: "recvonly" }); } catch {}
       }
-      if (state.localVideoStream) {
-        state.localVideoStream.getVideoTracks().forEach((track) => {
-          pc.addTrack(track, state.localVideoStream);
-        });
+      if (localVideoTrack) pc.addTrack(localVideoTrack, state.localVideoStream);
+      else {
+        try { pc.addTransceiver("video", { direction: "recvonly" }); } catch {}
       }
     } else {
       // Sin tracks propios: recibir audio/video del otro (solo recepción)
@@ -1733,9 +1772,19 @@
       video: null,
       container: null,
       stream: new MediaStream(),
+      pendingIce: [],
       name: (state.voicePeerNames && state.voicePeerNames.get(peerId)) || "Participante",
     };
     state.voicePeers.set(peerId, peer);
+
+    const refreshFloater = () => {
+      const floater = state.voiceFloaters.get(peerId);
+      if (floater) {
+        updateFloaterMedia(floater, peer.stream);
+      } else {
+        createFloater(peerId, peer.name, peer.stream);
+      }
+    };
 
     pc.ontrack = (event) => {
       const track = event.track;
@@ -1744,12 +1793,9 @@
         remoteAudio.srcObject = peer.stream;
         remoteAudio.play().catch(() => {});
       }
-      const floater = state.voiceFloaters.get(peerId);
-      if (floater) {
-        updateFloaterMedia(floater, peer.stream);
-      } else {
-        createFloater(peerId, peer.name, peer.stream);
-      }
+      // Cuando el track se desmutea, refrescar la ventanita (video real)
+      track.addEventListener?.("unmute", refreshFloater);
+      refreshFloater();
     };
 
     pc.onicecandidate = (event) => {
