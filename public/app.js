@@ -237,7 +237,7 @@
     return null;
   }
 
-  function emitAck(event, data, timeout = 9000) {
+  function emitAck(event, data, timeout = 30000) {
     return new Promise((resolve) => {
       socket.timeout(timeout).emit(event, data, (err, response) => {
         if (err) {
@@ -395,8 +395,10 @@
     if (!name) return toast("Escribe tu nombre para crear la sala");
 
     els.createSubmit.disabled = true;
+    els.createSubmit.textContent = "Creando…";
     const response = await emitAck("room:create", { name });
     els.createSubmit.disabled = false;
+    els.createSubmit.textContent = "Crear sala";
 
     if (!response.ok) return toast(response.error || "No se pudo crear la sala");
     onJoined(response, name);
@@ -409,8 +411,10 @@
     if (code.length < 4) return toast("Escribe el código de la sala");
 
     els.joinSubmit.disabled = true;
+    els.joinSubmit.textContent = "Entrando…";
     const response = await emitAck("room:join", { name, code });
     els.joinSubmit.disabled = false;
+    els.joinSubmit.textContent = "Entrar";
 
     if (!response.ok) return toast(response.error || "No se pudo entrar a la sala");
     onJoined(response, name);

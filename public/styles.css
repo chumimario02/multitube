@@ -2800,12 +2800,12 @@ body.immersive-open {
 
 .voice-floater {
   position: absolute;
-  width: 230px;
-  border-radius: 14px;
+  width: 260px;
+  border-radius: 16px;
   overflow: hidden;
   background: #0a0913;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 18px 48px -12px rgba(0, 0, 0, 0.85);
+  border: 2px solid rgba(139, 92, 246, 0.6);
+  box-shadow: 0 18px 48px -12px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(236, 72, 153, 0.3);
   pointer-events: auto;
   user-select: none;
   animation: floaterIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1.2) both;
