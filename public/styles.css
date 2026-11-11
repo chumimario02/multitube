@@ -2719,6 +2719,78 @@ body.immersive-open {
    Ventanas flotantes de video (chat de voz)
    ============================================================ */
 
+.voice-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.voice-bar-status {
+  font-size: 0.78rem;
+  color: var(--muted);
+  flex: 1;
+  min-width: 100px;
+}
+
+.voice-bar-controls,
+.voice-bar-active {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.voice-bar-btn {
+  padding: 7px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  font-size: 0.78rem;
+  font-weight: 600;
+  transition: background 0.2s, transform 0.15s;
+  cursor: pointer;
+}
+
+.voice-bar-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.voice-bar-btn.toggle {
+  background: rgba(139, 92, 246, 0.18);
+  border-color: rgba(139, 92, 246, 0.35);
+}
+
+.voice-bar-btn.danger {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.3);
+  color: #fca5a5;
+}
+
+/* Botón circular para activar voz/cámara */
+.voice-bar-btn.fab {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #8b5cf6, #ec4899);
+  border: 0;
+  color: #fff;
+  font-size: 1.1rem;
+  box-shadow: 0 6px 20px -4px rgba(236, 72, 153, 0.6);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.voice-bar-btn.fab:hover {
+  transform: scale(1.08);
+  box-shadow: 0 8px 26px -4px rgba(236, 72, 153, 0.8);
+}
+
 .voice-floaters {
   position: fixed;
   inset: 0;

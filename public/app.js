@@ -2070,7 +2070,6 @@
         const tab = button.dataset.tab;
         els.tabQueue.classList.toggle("hidden", tab !== "queue");
         els.tabSuggest.classList.toggle("hidden", tab !== "suggest");
-        els.tabVoice.classList.toggle("hidden", tab !== "voice");
         els.tabChat.classList.toggle("hidden", tab !== "chat");
       });
     });
