@@ -1488,22 +1488,133 @@
       : "🚫 Cámara off";
   }
 
+  function createFloater(id, name, stream) {
+    if (state.voiceFloaters.has(id)) {
+      const existing = state.voiceFloaters.get(id);
+      if (stream) updateFloaterMedia(existing, stream);
+      return existing;
+    }
+
+    const el = document.createElement("div");
+    el.className = "voice-floater";
+    el.dataset.peer = id;
+
+    const bar = document.createElement("div");
+    bar.className = "voice-floater-bar";
+
+    const nameEl = document.createElement("span");
+    nameEl.className = "voice-floater-name";
+    nameEl.textContent = name || "Participante";
+
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "voice-floater-close";
+    closeBtn.type = "button";
+    closeBtn.textContent = "×";
+    closeBtn.title = "Ocultar";
+    closeBtn.addEventListener("click", () => {
+      el.style.display = "none";
+    });
+
+    bar.append(nameEl, closeBtn);
+
+    const video = document.createElement("video");
+    video.className = "voice-floater-video";
+    video.autoplay = true;
+    video.playsInline = true;
+    video.muted = id === "self";
+
+    const audioTile = document.createElement("div");
+    audioTile.className = "voice-floater-audio";
+    const avatar = document.createElement("div");
+    avatar.className = "voice-floater-avatar";
+    avatar.style.setProperty("--h", String(hueFor(name || "P")));
+    avatar.textContent = initials(name || "P");
+    const small = document.createElement("small");
+    small.textContent = "🎤 en voz";
+    audioTile.append(avatar, small);
+
+    el.append(bar, video, audioTile);
+
+    // Posición en cascada desde el centro
+    const idx = state.floaterIndex++;
+    const baseX = window.innerWidth / 2 - 115 + (idx % 4) * 24;
+    const baseY = window.innerHeight / 2 - 90 + (idx % 4) * 24;
+    el.style.left = `${Math.max(8, baseX)}px`;
+    el.style.top = `${Math.max(8, baseY)}px`;
+
+    els.voiceFloaters.appendChild(el);
+
+    const floater = { el, video, audioTile, name };
+    state.voiceFloaters.set(id, floater);
+
+    makeDraggable(el, bar);
+
+    if (stream) updateFloaterMedia(floater, stream);
+
+    return floater;
+  }
+
+  function updateFloaterMedia(floater, stream) {
+    if (!floater || !stream) return;
+    const hasVideo = stream.getVideoTracks().length > 0;
+    if (hasVideo) {
+      floater.video.srcObject = stream;
+      floater.video.style.display = "block";
+      floater.audioTile.style.display = "none";
+    } else {
+      floater.video.style.display = "none";
+      floater.audioTile.style.display = "flex";
+    }
+  }
+
+  function removeFloater(id) {
+    const floater = state.voiceFloaters.get(id);
+    if (!floater) return;
+    floater.el.remove();
+    state.voiceFloaters.delete(id);
+  }
+
+  function makeDraggable(el, handle) {
+    let dragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    handle.addEventListener("mousedown", (e) => {
+      dragging = true;
+      const rect = el.getBoundingClientRect();
+      offsetX = e.clientX - rect.left;
+      offsetY = e.clientY - rect.top;
+      el.style.zIndex = "71";
+      e.preventDefault();
+    });
+
+    const onMove = (e) => {
+      if (!dragging) return;
+      let x = e.clientX - offsetX;
+      let y = e.clientY - offsetY;
+      x = Math.max(0, Math.min(window.innerWidth - el.offsetWidth, x));
+      y = Math.max(0, Math.min(window.innerHeight - el.offsetHeight, y));
+      el.style.left = `${x}px`;
+      el.style.top = `${y}px`;
+    };
+
+    const onUp = () => {
+      if (dragging) {
+        dragging = false;
+        el.style.zIndex = "70";
+      }
+    };
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+
   function createPeerConnection(peerId, isInitiator) {
     if (state.voicePeers.has(peerId)) {
       return state.voicePeers.get(peerId).pc;
     }
 
     const pc = new RTCPeerConnection(RTC_CONFIG);
-
-    const peer = {
-      pc,
-      audio: remoteAudio,
-      video: remoteVideo,
-      container,
-      stream: new MediaStream(),
-      name: (state.voicePeerNames && state.voicePeerNames.get(peerId)) || "Participante",
-    };
-    state.voicePeers.set(peerId, peer);
 
     if (state.localAudioStream) {
       state.localAudioStream.getAudioTracks().forEach((track) => {
@@ -1533,6 +1644,16 @@
     label.textContent = "Participante";
     container.append(remoteVideo, label);
     els.voiceRemotes.appendChild(container);
+
+    const peer = {
+      pc,
+      audio: remoteAudio,
+      video: remoteVideo,
+      container,
+      stream: new MediaStream(),
+      name: (state.voicePeerNames && state.voicePeerNames.get(peerId)) || "Participante",
+    };
+    state.voicePeers.set(peerId, peer);
 
     pc.ontrack = (event) => {
       const track = event.track;
