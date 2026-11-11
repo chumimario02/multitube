@@ -337,7 +337,7 @@
 
       // Si yo no estoy en voz, crear conexión solo-recepción para ver/oír al otro
       if (!state.voiceActive && !state.localAudioStream && !state.localVideoStream) {
-        createPeerConnection(fromId, true); // initiate as receiver (no local tracks)
+        createPeerConnection(fromId, true, false); // initiate as receiver (recvonly)
       }
     });
 
@@ -350,14 +350,28 @@
     socket.on("voice:offer", async ({ from, sdp } = {}) => {
       if (!from || !sdp) return;
       if (!state.voiceActive && !state.localAudioStream && !state.localVideoStream) return;
-      const pc = createPeerConnection(from, false);
+      // Crear la conexión sin agregar tracks primero
+      const pc = createPeerConnection(from, false, false);
       try {
+        // Primero establecer el remote desc (transceivers del offer)
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        // Luego agregar nuestros tracks (se asocian a los transceivers existentes)
+        if (state.localAudioStream) {
+          state.localAudioStream.getAudioTracks().forEach((track) => {
+            try { pc.addTrack(track, state.localAudioStream); } catch (e) {}
+          });
+        }
+        if (state.localVideoStream) {
+          state.localVideoStream.getVideoTracks().forEach((track) => {
+            try { pc.addTrack(track, state.localVideoStream); } catch (e) {}
+          });
+        }
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         socket.emit("voice:answer", { to: from, sdp: pc.localDescription });
       } catch (error) {
         console.error("voice offer error", error);
+        toast(`Error de voz: ${error.message || "desconocido"}`);
       }
     });
 
@@ -1694,27 +1708,27 @@
     document.addEventListener("touchcancel", onEnd);
   }
 
-  function createPeerConnection(peerId, isInitiator) {
+  function createPeerConnection(peerId, isInitiator, addTracks = true) {
     if (state.voicePeers.has(peerId)) {
       return state.voicePeers.get(peerId).pc;
     }
 
     const pc = new RTCPeerConnection(RTC_CONFIG);
 
-    if (state.localAudioStream) {
-      state.localAudioStream.getAudioTracks().forEach((track) => {
-        pc.addTrack(track, state.localAudioStream);
-      });
+    if (addTracks) {
+      if (state.localAudioStream) {
+        state.localAudioStream.getAudioTracks().forEach((track) => {
+          pc.addTrack(track, state.localAudioStream);
+        });
+      }
+      if (state.localVideoStream) {
+        state.localVideoStream.getVideoTracks().forEach((track) => {
+          pc.addTrack(track, state.localVideoStream);
+        });
+      }
     } else {
-      // Sin micrófono propio: recibir audio del otro (solo recepción)
+      // Sin tracks propios: recibir audio/video del otro (solo recepción)
       try { pc.addTransceiver("audio", { direction: "recvonly" }); } catch {}
-    }
-    if (state.localVideoStream) {
-      state.localVideoStream.getVideoTracks().forEach((track) => {
-        pc.addTrack(track, state.localVideoStream);
-      });
-    } else {
-      // Sin cámara propia: recibir video del otro (solo recepción)
       try { pc.addTransceiver("video", { direction: "recvonly" }); } catch {}
     }
 
