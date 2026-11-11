@@ -421,6 +421,10 @@
     state.rendered.clear();
     els.chatMessages.innerHTML = "";
 
+    // Reset voice preference per room so the prompt always appears on first join
+    state.voiceAsked = false;
+    sessionStorage.removeItem("multitube:voiceAsked");
+
     enterRoom();
     applyRoomState(response.state);
     (response.messages || []).forEach(renderMessage);
@@ -1492,6 +1496,8 @@
       return existing;
     }
 
+    if (!els.voiceFloaters) return null;
+
     const el = document.createElement("div");
     el.className = "voice-floater";
     el.dataset.peer = id;
@@ -1532,12 +1538,14 @@
 
     el.append(bar, video, audioTile);
 
-    // Posición en cascada desde el centro
+    // Posición en cascada desde el centro (asegurar que esté visible)
     const idx = state.floaterIndex++;
-    const baseX = window.innerWidth / 2 - 115 + (idx % 4) * 24;
-    const baseY = window.innerHeight / 2 - 90 + (idx % 4) * 24;
-    el.style.left = `${Math.max(8, baseX)}px`;
-    el.style.top = `${Math.max(8, baseY)}px`;
+    const vw = window.innerWidth || 360;
+    const vh = window.innerHeight || 640;
+    const baseX = Math.max(8, vw / 2 - 115 + (idx % 4) * 20);
+    const baseY = Math.max(60, vh / 2 - 90 + (idx % 4) * 20);
+    el.style.left = `${baseX}px`;
+    el.style.top = `${baseY}px`;
 
     els.voiceFloaters.appendChild(el);
 
