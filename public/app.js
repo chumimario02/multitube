@@ -1579,34 +1579,56 @@
     let offsetX = 0;
     let offsetY = 0;
 
-    handle.addEventListener("mousedown", (e) => {
+    const startDrag = (clientX, clientY) => {
       dragging = true;
       const rect = el.getBoundingClientRect();
-      offsetX = e.clientX - rect.left;
-      offsetY = e.clientY - rect.top;
+      offsetX = clientX - rect.left;
+      offsetY = clientY - rect.top;
       el.style.zIndex = "71";
-      e.preventDefault();
-    });
+    };
 
-    const onMove = (e) => {
+    const moveDrag = (clientX, clientY) => {
       if (!dragging) return;
-      let x = e.clientX - offsetX;
-      let y = e.clientY - offsetY;
+      let x = clientX - offsetX;
+      let y = clientY - offsetY;
       x = Math.max(0, Math.min(window.innerWidth - el.offsetWidth, x));
       y = Math.max(0, Math.min(window.innerHeight - el.offsetHeight, y));
       el.style.left = `${x}px`;
       el.style.top = `${y}px`;
     };
 
-    const onUp = () => {
+    const endDrag = () => {
       if (dragging) {
         dragging = false;
         el.style.zIndex = "70";
       }
     };
 
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
+    handle.addEventListener("mousedown", (e) => {
+      startDrag(e.clientX, e.clientY);
+      e.preventDefault();
+    });
+    handle.addEventListener("touchstart", (e) => {
+      if (e.touches && e.touches.length) {
+        startDrag(e.touches[0].clientX, e.touches[0].clientY);
+      }
+      e.preventDefault();
+    }, { passive: false });
+
+    const onMouseMove = (e) => moveDrag(e.clientX, e.clientY);
+    const onTouchMove = (e) => {
+      if (e.touches && e.touches.length) {
+        moveDrag(e.touches[0].clientX, e.touches[0].clientY);
+      }
+      e.preventDefault();
+    };
+    const onEnd = () => endDrag();
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onEnd);
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    document.addEventListener("touchend", onEnd);
+    document.addEventListener("touchcancel", onEnd);
   }
 
   function createPeerConnection(peerId, isInitiator) {
